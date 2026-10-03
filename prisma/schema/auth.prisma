@@ -1,0 +1,86 @@
+// =============================================================================
+// auth.prisma — session & verification token models
+//
+// Design notes:
+//  • Raw token values are *never* stored. Only a SHA-256 (or bcrypt) hash is
+//    persisted — exactly the same principle as passwordHash on User.
+//  • RefreshToken carries a mosqueId + role snapshot so the refresh endpoint
+//    can re-issue an access token without re-joining Membership on every call.
+//  • revokedAt (soft-delete) is preferred over hard-delete so that audit logs
+//    and concurrent-request races are handled gracefully.
+//  • PasswordResetToken and EmailVerificationToken both carry usedAt to
+//    make them single-use without immediately deleting the row (allows
+//    idempotent retries within the same request window).
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// RefreshToken
+// Issued on login / mosque-switch. One token per session/device.
+// ---------------------------------------------------------------------------
+model RefreshToken {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// SHA-256 hash of the opaque bearer value sent to the client.
+  tokenHash String @unique
+
+  // -- Mosque context snapshot ----------------------------------------------
+  /// The mosque this token was scoped to at issue time. Used by the refresh
+  /// endpoint to avoid an extra Membership JOIN on every token refresh.
+  mosqueId String?
+  role     Role?
+
+  // -- Device / audit metadata ----------------------------------------------
+  userAgent String?
+  ipAddress String?
+
+  // -- Lifecycle ------------------------------------------------------------
+  /// Set on logout, switch-mosque, or password reset. Checked before re-use.
+  revokedAt DateTime?
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// PasswordResetToken
+// One-use; expires after a short window (15–60 min recommended).
+// ---------------------------------------------------------------------------
+model PasswordResetToken {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// SHA-256 hash of the reset link token sent to the user's email.
+  tokenHash String    @unique
+  /// Set when the token is consumed; acts as a single-use guard.
+  usedAt    DateTime?
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// EmailVerificationToken
+// One-use; issued on registration and on "resend verification" requests.
+// ---------------------------------------------------------------------------
+model EmailVerificationToken {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// SHA-256 hash of the verification link token sent to the user's email.
+  tokenHash String    @unique
+  /// Set when the token is consumed; acts as a single-use guard.
+  usedAt    DateTime?
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("email_verification_tokens")
+}

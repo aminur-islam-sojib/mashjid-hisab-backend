@@ -1,0 +1,28 @@
+// =============================================================================
+// enums.prisma — all application-wide enum definitions
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// Role
+// SUPER_ADMIN is a platform-level role and is never scoped to a mosque.
+// All other roles live on a Membership row.
+// ---------------------------------------------------------------------------
+enum Role {
+  SUPER_ADMIN      // platform-level — not mosque-scoped
+  MOSQUE_ADMIN     // full control within a single mosque
+  TREASURER        // financial records & reporting
+  STAFF            // day-to-day operations
+  COMMITTEE_MEMBER // advisory / governance body
+  MEMBER           // general mosque member
+}
+
+// ---------------------------------------------------------------------------
+// MembershipStatus
+// Drives access control: only ACTIVE memberships are allowed through guards.
+// ---------------------------------------------------------------------------
+enum MembershipStatus {
+  PENDING   // invite sent; user has not yet accepted
+  ACTIVE    // full access granted
+  SUSPENDED // access revoked without deleting audit history
+  REJECTED  // invite explicitly declined by the invitee
+}

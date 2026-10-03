@@ -1,0 +1,36 @@
+// =============================================================================
+// mosque.prisma — Mosque model (the SaaS tenant)
+//
+// Design notes:
+//  • Each mosque is an independent tenant. All tenant-scoped data is reached
+//    through Membership, never by embedding mosqueId in User/Profile.
+//  • `slug` drives the public URL (/m/{slug}) and the switch-mosque UI,
+//    so it must be unique and URL-safe.
+//  • `fiscalYearStart` lets each mosque align financial reports to its own
+//    calendar (e.g. July for Bangladesh Govt. fiscal year).
+// =============================================================================
+
+model Mosque {
+  id      String  @id @default(cuid())
+  name    String
+  /// URL-safe identifier used in /m/{slug} routes and the switch-mosque UI.
+  slug    String  @unique
+  address String?
+
+  /// IANA timezone, e.g. "Asia/Dhaka". Used for prayer-time calculations and
+  /// report date boundaries.
+  timezone String @default("Asia/Dhaka")
+
+  /// Month number (1–12) at which the mosque's fiscal year begins.
+  /// Default: 7 (July), matching the Bangladesh Government fiscal calendar.
+  fiscalYearStart Int @default(7)
+
+  // -- Timestamps -----------------------------------------------------------
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // -- Relations ------------------------------------------------------------
+  memberships Membership[]
+
+  @@map("mosques")
+}
