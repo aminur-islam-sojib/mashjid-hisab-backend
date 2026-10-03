@@ -9,6 +9,9 @@ import {
   refresh,
   getMe,
   logout,
+  forgotPassword,
+  resetPassword,
+  verifyEmail,
 } from "./auth.controller.js";
 import { authenticate } from "../../middlewares/auth.middleware.js";
 
@@ -45,5 +48,25 @@ authRouter.get("/me", authenticate, getMe);
  * Authenticated — revokes the current refresh token server-side and clears cookies.
  */
 authRouter.post("/logout", authenticate, logout);
+
+/**
+ * POST /api/auth/forgot-password
+ * Public — generates password reset token and emails it. Returns constant-time
+ * generic success response to prevent account enumeration.
+ */
+authRouter.post("/forgot-password", forgotPassword);
+
+/**
+ * POST /api/auth/reset-password
+ * Public (with valid reset token) — verifies token, updates password, and bumps
+ * sessionVersion (invalidating existing refresh tokens on all devices).
+ */
+authRouter.post("/reset-password", resetPassword);
+
+/**
+ * POST /api/auth/verify-email
+ * Public (with valid verify token) — verifies emailed token and marks emailVerified = true.
+ */
+authRouter.post("/verify-email", verifyEmail);
 
 export default authRouter;

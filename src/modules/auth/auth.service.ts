@@ -30,7 +30,13 @@ import {
   tokenExpiresAt,
   type RefreshTokenPayload,
 } from "../../utils/token.js";
-import type { RegisterInput, LoginInput } from "./auth.validation.js";
+import type {
+  RegisterInput,
+  LoginInput,
+  ForgotPasswordInput,
+  ResetPasswordInput,
+  VerifyEmailInput,
+} from "./auth.validation.js";
 import {
   MembershipStatus,
   Role,
@@ -613,4 +619,175 @@ export async function getAuthenticatedUser(
     role: active?.role ?? null,
     memberships: user.memberships,
   };
+}
+
+// ---------------------------------------------------------------------------
+// requestPasswordReset — creates reset token and logs/sends it
+// Constant-time response: returns void regardless of whether email exists.
+// ---------------------------------------------------------------------------
+
+export async function requestPasswordReset(
+  input: ForgotPasswordInput,
+): Promise<{ rawToken: string | null }> {
+  const user = await prisma.user.findUnique({
+    where: { email: input.email.toLowerCase() },
+    select: { id: true, email: true },
+  });
+
+  if (!user) {
+    // Return silently to prevent user enumeration
+    return { rawToken: null };
+  }
+
+  // Invalidate any previously active unused reset tokens for this user
+  await prisma.passwordResetToken.updateMany({
+    where: {
+      userId: user.id,
+      usedAt: null,
+    },
+    data: {
+      usedAt: new Date(),
+    },
+  });
+
+  // Generate new secure opaque token (hash stored, raw sent via email)
+  const { raw: rawToken, hash: tokenHash } = generateOpaqueToken();
+
+  await prisma.passwordResetToken.create({
+    data: {
+      userId: user.id,
+      tokenHash,
+      expiresAt: tokenExpiresAt(config.PASSWORD_RESET_TOKEN_TTL_MS),
+    },
+  });
+
+  // Return raw token for email dispatching / dev testing
+  return { rawToken };
+}
+
+// ---------------------------------------------------------------------------
+// resetPassword — verifies reset token, updates password, and bumps sessionVersion
+// Bumping sessionVersion immediately invalidates all outstanding refresh tokens.
+// ---------------------------------------------------------------------------
+
+export async function resetPassword(
+  input: ResetPasswordInput,
+): Promise<void> {
+  const tokenHash = hashToken(input.token);
+
+  const resetRecord = await prisma.passwordResetToken.findUnique({
+    where: { tokenHash },
+    include: {
+      user: {
+        select: { id: true, sessionVersion: true },
+      },
+    },
+  });
+
+  if (!resetRecord || !resetRecord.user) {
+    throw HttpError.badRequest(
+      "Invalid or expired password reset token.",
+      "AUTH_RESET_TOKEN_INVALID",
+    );
+  }
+
+  if (resetRecord.usedAt) {
+    throw HttpError.badRequest(
+      "This password reset token has already been used.",
+      "AUTH_RESET_TOKEN_USED",
+    );
+  }
+
+  if (resetRecord.expiresAt < new Date()) {
+    throw HttpError.badRequest(
+      "Password reset token has expired. Please request a new one.",
+      "AUTH_RESET_TOKEN_EXPIRED",
+    );
+  }
+
+  // Hash new password before transaction
+  const passwordHash = await bcrypt.hash(input.password, config.BCRYPT_ROUNDS);
+
+  // Atomic transaction: mark token used, bump sessionVersion, update password, revoke sessions
+  await prisma.$transaction(async (tx) => {
+    // 1. Mark token as consumed
+    await tx.passwordResetToken.update({
+      where: { id: resetRecord.id },
+      data: { usedAt: new Date() },
+    });
+
+    // 2. Update user's password and increment sessionVersion
+    await tx.user.update({
+      where: { id: resetRecord.userId },
+      data: {
+        passwordHash,
+        sessionVersion: { increment: 1 },
+      },
+    });
+
+    // 3. Invalidate/revoke all active refresh tokens for this user in DB
+    await tx.refreshToken.updateMany({
+      where: {
+        userId: resetRecord.userId,
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// verifyEmail — verifies emailed token and sets User.emailVerified = true
+// Has no effect on existing sessions (sessionVersion is not bumped).
+// ---------------------------------------------------------------------------
+
+export async function verifyEmail(
+  input: VerifyEmailInput,
+): Promise<void> {
+  const tokenHash = hashToken(input.token);
+
+  const verifyRecord = await prisma.emailVerificationToken.findUnique({
+    where: { tokenHash },
+    include: {
+      user: {
+        select: { id: true, emailVerified: true },
+      },
+    },
+  });
+
+  if (!verifyRecord || !verifyRecord.user) {
+    throw HttpError.badRequest(
+      "Invalid or expired email verification token.",
+      "AUTH_VERIFY_TOKEN_INVALID",
+    );
+  }
+
+  if (verifyRecord.usedAt) {
+    throw HttpError.badRequest(
+      "This verification token has already been used.",
+      "AUTH_VERIFY_TOKEN_USED",
+    );
+  }
+
+  if (verifyRecord.expiresAt < new Date()) {
+    throw HttpError.badRequest(
+      "Email verification token has expired. Please request a new one.",
+      "AUTH_VERIFY_TOKEN_EXPIRED",
+    );
+  }
+
+  // Atomic transaction: mark token as consumed & mark user as verified
+  await prisma.$transaction(async (tx) => {
+    await tx.emailVerificationToken.update({
+      where: { id: verifyRecord.id },
+      data: { usedAt: new Date() },
+    });
+
+    await tx.user.update({
+      where: { id: verifyRecord.userId },
+      data: { emailVerified: true },
+    });
+  });
 }

@@ -67,6 +67,12 @@ const config = {
     "EMAIL_VERIFY_TOKEN_TTL_MS",
     24 * 60 * 60 * 1000, // 24 hours
   ),
+
+  // Password reset token TTL (milliseconds)
+  PASSWORD_RESET_TOKEN_TTL_MS: optionalInt(
+    "PASSWORD_RESET_TOKEN_TTL_MS",
+    60 * 60 * 1000, // 1 hour
+  ),
 } as const;
 
 export type AppConfig = typeof config;

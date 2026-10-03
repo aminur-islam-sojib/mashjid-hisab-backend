@@ -152,3 +152,104 @@ export function validateLoginInput(body: unknown): LoginInput {
 
   return { identifier, password };
 }
+
+// ---------------------------------------------------------------------------
+// Forgot Password
+// ---------------------------------------------------------------------------
+
+export interface ForgotPasswordInput {
+  email: string;
+}
+
+export function validateForgotPasswordInput(body: unknown): ForgotPasswordInput {
+  if (!body || typeof body !== "object") {
+    throw HttpError.badRequest("Request body must be a JSON object.");
+  }
+
+  const raw = body as Record<string, unknown>;
+  const email =
+    typeof raw["email"] === "string" ? raw["email"].trim().toLowerCase() : "";
+
+  if (!email || !EMAIL_RE.test(email)) {
+    throw HttpError.validationError([
+      { field: "email", issue: "A valid email address is required." },
+    ]);
+  }
+
+  return { email };
+}
+
+// ---------------------------------------------------------------------------
+// Reset Password
+// ---------------------------------------------------------------------------
+
+export interface ResetPasswordInput {
+  token: string;
+  password: string;
+}
+
+export function validateResetPasswordInput(body: unknown): ResetPasswordInput {
+  if (!body || typeof body !== "object") {
+    throw HttpError.badRequest("Request body must be a JSON object.");
+  }
+
+  const raw = body as Record<string, unknown>;
+  const issues: ValidationIssue[] = [];
+
+  const token = typeof raw["token"] === "string" ? raw["token"].trim() : "";
+  if (!token) {
+    issues.push({ field: "token", issue: "Reset token is required." });
+  }
+
+  const password =
+    typeof raw["password"] === "string"
+      ? raw["password"]
+      : typeof raw["newPassword"] === "string"
+        ? raw["newPassword"]
+        : "";
+
+  if (password.length < 8) {
+    issues.push({ field: "password", issue: "Must be at least 8 characters." });
+  } else {
+    if (!/[A-Z]/.test(password)) {
+      issues.push({ field: "password", issue: "Must contain at least one uppercase letter." });
+    }
+    if (!/[a-z]/.test(password)) {
+      issues.push({ field: "password", issue: "Must contain at least one lowercase letter." });
+    }
+    if (!/[0-9]/.test(password)) {
+      issues.push({ field: "password", issue: "Must contain at least one digit." });
+    }
+  }
+
+  if (issues.length > 0) {
+    throw HttpError.validationError(issues);
+  }
+
+  return { token, password };
+}
+
+// ---------------------------------------------------------------------------
+// Verify Email
+// ---------------------------------------------------------------------------
+
+export interface VerifyEmailInput {
+  token: string;
+}
+
+export function validateVerifyEmailInput(body: unknown): VerifyEmailInput {
+  if (!body || typeof body !== "object") {
+    throw HttpError.badRequest("Request body must be a JSON object.");
+  }
+
+  const raw = body as Record<string, unknown>;
+  const token = typeof raw["token"] === "string" ? raw["token"].trim() : "";
+
+  if (!token) {
+    throw HttpError.validationError([
+      { field: "token", issue: "Verification token is required." },
+    ]);
+  }
+
+  return { token };
+}
