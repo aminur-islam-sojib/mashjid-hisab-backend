@@ -1,21 +1,22 @@
 // ---------------------------------------------------------------------------
-// Auth Service — register + login + me
+// Auth Service — register + login + refresh + me + logout
 //
 // Responsibilities:
 //  1. Uniqueness check (email + phone) — before hashing to avoid wasted work.
 //  2. Atomic DB transaction: User + Profile + optional Membership.
 //  3. Email-verification token issued and persisted (hash only).
 //  4. Refresh token row created (hash only) + JWT pair issued.
-//  5. Returns only what the controller needs — no raw passwords or hashes
+//  5. Refresh token verification against stored hash & user sessionVersion.
+//  6. Returns only what the controller needs — no raw passwords or hashes
 //     ever leave this layer.
 //
-// Error strategy: throw HttpError for domain violations (duplicate email,
-// mosque not found). Unexpected DB errors surface as unhandled rejections
-// caught by catchAsync → global error handler.
+// Error strategy: throw HttpError for domain violations. Unexpected DB errors
+// surface as unhandled rejections caught by catchAsync → global error handler.
 // ---------------------------------------------------------------------------
 
 import bcrypt from "bcrypt";
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
 
 import { prisma } from "../../lib/prisma.js";
 import config from "../../config/index.js";
@@ -23,8 +24,11 @@ import { HttpError } from "../../errors/HttpError.js";
 import {
   signAccessToken,
   signRefreshToken,
+  verifyRefreshToken,
   generateOpaqueToken,
+  hashToken,
   tokenExpiresAt,
+  type RefreshTokenPayload,
 } from "../../utils/token.js";
 import type { RegisterInput, LoginInput } from "./auth.validation.js";
 import {
@@ -77,6 +81,16 @@ export interface LoginResult {
   accessToken: string;
   /** Raw refresh JWT — controller puts this in an httpOnly cookie only */
   refreshToken: string;
+}
+
+// ---------------------------------------------------------------------------
+// Refresh result
+// ---------------------------------------------------------------------------
+
+export interface RefreshResult {
+  accessToken: string;
+  activeMosqueId: string | null;
+  role: Role | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,10 +155,7 @@ async function issueRefreshToken(
     sessionVersion,
   });
 
-  const tokenHash = crypto
-    .createHash("sha256")
-    .update(rawRefreshJwt)
-    .digest("hex");
+  const tokenHash = hashToken(rawRefreshJwt);
 
   await tx.refreshToken.create({
     data: {
@@ -418,6 +429,121 @@ export async function loginUser(
     accessToken,
     refreshToken: rawRefreshJwt,
   };
+}
+
+// ---------------------------------------------------------------------------
+// refreshAccessToken — verifies refresh token and issues a new access token
+// ---------------------------------------------------------------------------
+
+export async function refreshAccessToken(
+  rawRefreshToken: string,
+): Promise<RefreshResult> {
+  // 1. Verify cryptographic JWT signature & expiration
+  let payload: RefreshTokenPayload;
+  try {
+    payload = verifyRefreshToken(rawRefreshToken);
+  } catch (error) {
+    if (error instanceof jwt.TokenExpiredError) {
+      throw HttpError.unauthorized(
+        "Refresh token has expired. Please login again.",
+        "AUTH_REFRESH_TOKEN_EXPIRED",
+      );
+    }
+    if (error instanceof jwt.JsonWebTokenError) {
+      throw HttpError.unauthorized(
+        "Invalid refresh token.",
+        "AUTH_REFRESH_TOKEN_INVALID",
+      );
+    }
+    throw HttpError.unauthorized(
+      "Failed to authenticate refresh token.",
+      "AUTH_UNAUTHORIZED",
+    );
+  }
+
+  // 2. Hash the raw refresh token to look up the DB record
+  const tokenHash = hashToken(rawRefreshToken);
+
+  // 3. Find record in DB and join the user to inspect current sessionVersion
+  const storedToken = await prisma.refreshToken.findUnique({
+    where: { tokenHash },
+    include: {
+      user: {
+        select: {
+          id: true,
+          sessionVersion: true,
+        },
+      },
+    },
+  });
+
+  if (!storedToken || !storedToken.user) {
+    throw HttpError.unauthorized(
+      "Refresh token is invalid or unrecognized.",
+      "AUTH_REFRESH_TOKEN_INVALID",
+    );
+  }
+
+  // 4. Rejected if the token was revoked (soft-deleted on logout/switch-mosque/reset)
+  if (storedToken.revokedAt) {
+    throw HttpError.unauthorized(
+      "Refresh token has been revoked.",
+      "AUTH_REFRESH_TOKEN_REVOKED",
+    );
+  }
+
+  // 5. Check database expiration
+  if (storedToken.expiresAt < new Date()) {
+    throw HttpError.unauthorized(
+      "Refresh token has expired. Please login again.",
+      "AUTH_REFRESH_TOKEN_EXPIRED",
+    );
+  }
+
+  // 6. Rejected if sessionVersion is stale (bumped on role change, password reset, logout-everywhere)
+  if (storedToken.user.sessionVersion !== payload.sessionVersion) {
+    throw HttpError.unauthorized(
+      "Session is stale or has been invalidated. Please login again.",
+      "AUTH_SESSION_STALE",
+    );
+  }
+
+  // 7. Issue new short-lived access token carrying the same activeMosqueId and role
+  const newAccessToken = signAccessToken({
+    sub: storedToken.userId,
+    mosqueId: storedToken.mosqueId,
+    role: storedToken.role,
+    sessionVersion: storedToken.user.sessionVersion,
+  });
+
+  return {
+    accessToken: newAccessToken,
+    activeMosqueId: storedToken.mosqueId,
+    role: storedToken.role,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// revokeRefreshToken — marks refresh token as revoked in DB on logout
+// ---------------------------------------------------------------------------
+
+export async function revokeRefreshToken(
+  rawRefreshToken: string,
+): Promise<void> {
+  try {
+    const tokenHash = hashToken(rawRefreshToken);
+    await prisma.refreshToken.updateMany({
+      where: {
+        tokenHash,
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+  } catch {
+    // Best-effort: ignore if token hash is missing or DB record not found
+  }
 }
 
 // ---------------------------------------------------------------------------
