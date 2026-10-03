@@ -31,17 +31,16 @@ import {
   MembershipStatus,
   Role,
   type Membership,
-  type User,
 } from "../../../generated/prisma/client.js";
 
 // ---------------------------------------------------------------------------
-// Return types — strip secrets before leaving the service layer
+// Public return types — no secrets, no internal fields
 // ---------------------------------------------------------------------------
 
-export interface AuthTokens {
-  accessToken: string;
-  refreshToken: string; // raw JWT — caller puts it in an httpOnly cookie
-}
+export type PublicMembership = Pick<
+  Membership,
+  "id" | "mosqueId" | "role" | "status"
+>;
 
 export interface RegisteredUser {
   id: string;
@@ -50,29 +49,33 @@ export interface RegisteredUser {
   phone: string | null;
   locale: string;
   emailVerified: boolean;
-  membership: Pick<Membership, "id" | "mosqueId" | "role" | "status"> | null;
 }
 
 export interface RegisterResult {
   user: RegisteredUser;
-  tokens: AuthTokens;
-  /** raw email-verification token — caller hands this to the email service */
+  memberships: PublicMembership[];
+  accessToken: string;
+  /** raw refresh JWT — controller puts this in an httpOnly cookie only */
+  refreshToken: string;
+  /** raw email-verification token — hand to the email queue, never the client */
   emailVerifyToken: string;
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Internal helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Derive the active mosque context from a list of ACTIVE memberships.
- * • 1 ACTIVE  → auto-selected
- * • 0 or >1   → null (client must switch-mosque or create/join one)
+ * Resolve the single active mosque context for token claims.
+ * • Exactly 1 ACTIVE membership → auto-selected for the JWT payload.
+ * • 0 or >1                     → null (client must call switch-mosque).
  */
 function resolveActiveMembership(
-  memberships: Pick<Membership, "id" | "mosqueId" | "role" | "status">[],
-): Pick<Membership, "id" | "mosqueId" | "role" | "status"> | null {
-  const active = memberships.filter((m) => m.status === MembershipStatus.ACTIVE);
+  memberships: PublicMembership[],
+): PublicMembership | null {
+  const active = memberships.filter(
+    (m) => m.status === MembershipStatus.ACTIVE,
+  );
   return active.length === 1 && active[0] ? active[0] : null;
 }
 
@@ -87,7 +90,7 @@ export async function registerUser(
   const { name, email, phone, password, mosqueId, locale } = input;
 
   // -------------------------------------------------------------------------
-  // 1. Pre-flight uniqueness checks — fast, outside the transaction
+  // 1. Pre-flight uniqueness checks — parallel, outside the transaction
   // -------------------------------------------------------------------------
   const [existingEmail, existingPhone] = await Promise.all([
     prisma.user.findUnique({ where: { email }, select: { id: true } }),
@@ -126,157 +129,130 @@ export async function registerUser(
   }
 
   // -------------------------------------------------------------------------
-  // 3. Expensive CPU work — hash password BEFORE the transaction to keep
-  //    the DB connection time as short as possible.
+  // 3. CPU-expensive work BEFORE the transaction — bcrypt keeps the DB
+  //    connection time as short as possible.
   // -------------------------------------------------------------------------
   const passwordHash = await bcrypt.hash(password, config.BCRYPT_ROUNDS);
 
   // -------------------------------------------------------------------------
-  // 4. Generate tokens (cheap, sync) before opening the transaction
+  // 4. Prepare token material (cheap + sync) before opening the transaction
   // -------------------------------------------------------------------------
   const { raw: rawEmailToken, hash: emailTokenHash } = generateOpaqueToken();
   const refreshJti = crypto.randomUUID();
 
   // -------------------------------------------------------------------------
-  // 5. Atomic DB transaction — User + Profile + optional Membership +
-  //    EmailVerificationToken + RefreshToken
+  // 5. Atomic transaction — User + Profile + optional Membership +
+  //    EmailVerificationToken + RefreshToken (hash only)
   // -------------------------------------------------------------------------
-  const {
-    user,
-    membership,
-    refreshTokenRecord,
-  } = await prisma.$transaction(async (tx) => {
-    // 5a. Create User
-    const user = await tx.user.create({
-      data: {
-        name,
-        email,
-        phone,
-        passwordHash,
-        locale: locale ?? "bn",
-        emailVerified: false,
-        sessionVersion: 1,
-        // 5b. Profile created inline (nested write = same round-trip)
-        profile: {
-          create: {},
-        },
-      },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phone: true,
-        locale: true,
-        emailVerified: true,
-        sessionVersion: true,
-      },
-    });
-
-    // 5c. Optional Membership
-    let membership: Pick<Membership, "id" | "mosqueId" | "role" | "status"> | null = null;
-    if (mosqueId) {
-      membership = await tx.membership.create({
+  const { createdUser, memberships, rawRefreshJwt } =
+    await prisma.$transaction(async (tx) => {
+      // 5a. User + Profile (nested write = 1 round-trip)
+      const createdUser = await tx.user.create({
         data: {
-          userId: user.id,
-          mosqueId,
-          role: Role.MEMBER,
-          status: MembershipStatus.PENDING, // tighten to ACTIVE once approval flow exists
+          name,
+          email,
+          phone,
+          passwordHash,
+          locale: locale ?? "bn",
+          emailVerified: false,
+          sessionVersion: 1,
+          profile: { create: {} },
         },
-        select: { id: true, mosqueId: true, role: true, status: true },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          locale: true,
+          emailVerified: true,
+          sessionVersion: true,
+        },
       });
-    }
 
-    // 5d. Email-verification token (hash only in DB)
-    await tx.emailVerificationToken.create({
-      data: {
-        userId: user.id,
-        tokenHash: emailTokenHash,
-        expiresAt: tokenExpiresAt(config.EMAIL_VERIFY_TOKEN_TTL_MS),
-      },
-    });
+      // 5b. Optional Membership
+      const memberships: PublicMembership[] = [];
+      if (mosqueId) {
+        const membership = await tx.membership.create({
+          data: {
+            userId: createdUser.id,
+            mosqueId,
+            role: Role.MEMBER,
+            // PENDING until the mosque's approval flow promotes it to ACTIVE
+            status: MembershipStatus.PENDING,
+          },
+          select: { id: true, mosqueId: true, role: true, status: true },
+        });
+        memberships.push(membership);
+      }
 
-    // 5e. Determine mosque context for tokens
-    const activeMembership = membership
-      ? resolveActiveMembership([membership])
-      : null;
+      // 5c. Email-verification token — hash only in DB
+      await tx.emailVerificationToken.create({
+        data: {
+          userId: createdUser.id,
+          tokenHash: emailTokenHash,
+          expiresAt: tokenExpiresAt(config.EMAIL_VERIFY_TOKEN_TTL_MS),
+        },
+      });
 
-    // 5f. Refresh token DB row (hash only)
-    const refreshExpiresAt = tokenExpiresAt(config.JWT_REFRESH_EXPIRES_IN_MS);
-    const rawRefreshJwt = signRefreshToken({
-      sub: user.id,
-      jti: refreshJti,
-      mosqueId: activeMembership?.mosqueId ?? null,
-      role: activeMembership?.role ?? null,
-      sessionVersion: user.sessionVersion,
-    });
+      // 5d. Determine mosque context for token claims
+      const activeMembership = resolveActiveMembership(memberships);
 
-    const tokenHash = crypto
-      .createHash("sha256")
-      .update(rawRefreshJwt)
-      .digest("hex");
-
-    const refreshTokenRecord = await tx.refreshToken.create({
-      data: {
-        userId: user.id,
-        tokenHash,
+      // 5e. Sign refresh JWT and persist only the hash
+      const rawRefreshJwt = signRefreshToken({
+        sub: createdUser.id,
+        jti: refreshJti,
         mosqueId: activeMembership?.mosqueId ?? null,
         role: activeMembership?.role ?? null,
-        expiresAt: refreshExpiresAt,
-        userAgent: meta.userAgent,
-        ipAddress: meta.ipAddress,
-      },
-      select: { id: true },
+        sessionVersion: createdUser.sessionVersion,
+      });
+
+      const refreshTokenHash = crypto
+        .createHash("sha256")
+        .update(rawRefreshJwt)
+        .digest("hex");
+
+      await tx.refreshToken.create({
+        data: {
+          userId: createdUser.id,
+          tokenHash: refreshTokenHash,
+          mosqueId: activeMembership?.mosqueId ?? null,
+          role: activeMembership?.role ?? null,
+          expiresAt: tokenExpiresAt(config.JWT_REFRESH_EXPIRES_IN_MS),
+          userAgent: meta.userAgent,
+          ipAddress: meta.ipAddress,
+        },
+      });
+
+      return { createdUser, memberships, rawRefreshJwt };
     });
 
-    return { user, membership, refreshTokenRecord, rawRefreshJwt, activeMembership };
-  }) as {
-    user: Pick<User, "id" | "name" | "email" | "phone" | "locale" | "emailVerified" | "sessionVersion">;
-    membership: Pick<Membership, "id" | "mosqueId" | "role" | "status"> | null;
-    refreshTokenRecord: { id: string };
-    rawRefreshJwt: string;
-    activeMembership: Pick<Membership, "id" | "mosqueId" | "role" | "status"> | null;
-  };
-
-  // The transaction closure captures rawRefreshJwt and activeMembership —
-  // re-derive them from returned values here for cleanliness.
-  const activeMembership = membership
-    ? resolveActiveMembership([membership])
-    : null;
-
-  const rawRefreshJwt = signRefreshToken({
-    sub: user.id,
-    jti: refreshJti,
-    mosqueId: activeMembership?.mosqueId ?? null,
-    role: activeMembership?.role ?? null,
-    sessionVersion: user.sessionVersion,
-  });
+  // -------------------------------------------------------------------------
+  // 6. Sign access token (outside transaction — purely in-memory)
+  // -------------------------------------------------------------------------
+  const activeMembership = resolveActiveMembership(memberships);
 
   const accessToken = signAccessToken({
-    sub: user.id,
+    sub: createdUser.id,
     mosqueId: activeMembership?.mosqueId ?? null,
     role: activeMembership?.role ?? null,
-    sessionVersion: user.sessionVersion,
+    sessionVersion: createdUser.sessionVersion,
   });
 
   // -------------------------------------------------------------------------
-  // 6. Shape the public-facing user object (no hashes, no internal fields)
+  // 7. Return clean public-facing shape — no hashes, no DB internals
   // -------------------------------------------------------------------------
-  const publicUser: RegisteredUser = {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    phone: user.phone ?? null,
-    locale: user.locale,
-    emailVerified: user.emailVerified,
-    membership,
-  };
-
   return {
-    user: publicUser,
-    tokens: {
-      accessToken,
-      refreshToken: rawRefreshJwt,
+    user: {
+      id: createdUser.id,
+      name: createdUser.name,
+      email: createdUser.email,
+      phone: createdUser.phone ?? null,
+      locale: createdUser.locale,
+      emailVerified: createdUser.emailVerified,
     },
+    memberships,
+    accessToken,
+    refreshToken: rawRefreshJwt,
     emailVerifyToken: rawEmailToken,
   };
 }

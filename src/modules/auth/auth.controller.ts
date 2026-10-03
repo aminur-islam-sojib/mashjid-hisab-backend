@@ -23,29 +23,29 @@ import { registerUser } from "./auth.service.js";
 // POST /api/auth/register
 // ---------------------------------------------------------------------------
 export const register = catchAsync(async (req: Request, res: Response) => {
-  // 1. Validate & sanitise input — throws HttpError on failure
+  // 1. Validate & sanitise — throws HttpError on any violation
   const input = validateRegisterInput(req.body);
 
-  // 2. Delegate to service
+  // 2. Delegate all business logic to the service
   const result = await registerUser(input, {
     userAgent: req.headers["user-agent"],
     ipAddress: req.ip,
   });
 
-  // 3. Place refresh token in an httpOnly cookie (never in the body)
-  setRefreshTokenCookie(res, result.tokens.refreshToken);
+  // 3. Refresh token → httpOnly cookie only (never exposed in the body)
+  setRefreshTokenCookie(res, result.refreshToken);
 
-  // 4. TODO: dispatch email-verification email
-  //    e.g. emailQueue.push({ userId: result.user.id, token: result.emailVerifyToken })
-  //    Kept out of the request cycle so a slow mail server can't delay the response.
+  // 4. TODO: enqueue email-verification email out-of-band
+  //    emailQueue.push({ userId: result.user.id, token: result.emailVerifyToken })
 
-  // 5. Respond — access token in body, refresh token already in cookie
+  // 5. Respond — exact agreed shape
   sendResponse(res, {
     statusCode: 201,
     message: "Registration successful. Please verify your email.",
     data: {
       user: result.user,
-      accessToken: result.tokens.accessToken,
+      memberships: result.memberships,
+      accessToken: result.accessToken,
     },
   });
 });
