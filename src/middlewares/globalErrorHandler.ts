@@ -4,8 +4,15 @@
 // Must be registered LAST in app.ts (after all routes).
 // Express identifies a 4-argument function as an error handler.
 //
-// Response shape on error:
-//   { success: false, message: string, code: string, errors?: unknown }
+// Error envelope (all errors, every route):
+//   {
+//     "success": false,
+//     "error": {
+//       "code":    string,
+//       "message": string,
+//       "details": ValidationIssue[] | null
+//     }
+//   }
 // ---------------------------------------------------------------------------
 
 import type { Request, Response, NextFunction } from "express";
@@ -20,30 +27,37 @@ export function globalErrorHandler(
   _next: NextFunction,
 ): void {
   // -------------------------------------------------------------------------
-  // Known application error
+  // Known application error — serialise exactly as-is
   // -------------------------------------------------------------------------
   if (err instanceof HttpError) {
     res.status(err.statusCode).json({
       success: false,
-      message: err.message,
-      code: err.code,
+      error: {
+        code: err.code,
+        message: err.message,
+        details: err.details ?? null,
+      },
     });
     return;
   }
 
   // -------------------------------------------------------------------------
-  // Unknown / unexpected error — log full details server-side, return a
-  // generic message to the client (never leak internals in production).
+  // Unknown / unexpected error
+  // Log the full error server-side; send a generic message to the client.
+  // Never leak stack traces or internal details in production.
   // -------------------------------------------------------------------------
   console.error("[UnhandledError]", err);
 
   res.status(500).json({
     success: false,
-    message: "An unexpected error occurred. Please try again later.",
-    code: "INTERNAL_SERVER_ERROR",
-    // Stack trace only in development — never in production
-    ...(config.NODE_ENV === "development" && err instanceof Error
-      ? { stack: err.stack }
-      : {}),
+    error: {
+      code: "INTERNAL_SERVER_ERROR",
+      message: "An unexpected error occurred. Please try again later.",
+      details: null,
+      // Stack trace only in development — stripped in production builds
+      ...(config.NODE_ENV === "development" && err instanceof Error
+        ? { _stack: err.stack }
+        : {}),
+    },
   });
 }

@@ -43,6 +43,10 @@ const config = {
   JWT_ACCESS_SECRET: required("JWT_ACCESS_SECRET"),
   JWT_REFRESH_SECRET: required("JWT_REFRESH_SECRET"),
   JWT_ACCESS_EXPIRES_IN: optional("JWT_ACCESS_EXPIRES_IN", "15m"),
+  JWT_ACCESS_EXPIRES_IN_MS: optionalInt(
+    "JWT_ACCESS_EXPIRES_IN_MS",
+    15 * 60 * 1000, // 15 minutes
+  ),
   JWT_REFRESH_EXPIRES_IN_MS: optionalInt(
     "JWT_REFRESH_EXPIRES_IN_MS",
     7 * 24 * 60 * 60 * 1000, // 7 days
