@@ -169,15 +169,19 @@ export const getMe = catchAsync(async (req: Request, res: Response) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/auth/logout — 200 OK
-// Revokes the refresh token in the database and clears auth cookies.
+// POST /api/auth/logout — 200 OK (Authenticated)
+// Revokes the current refresh token server-side and clears its cookies.
+// The access token simply expires on its own short TTL (15 min).
 // ---------------------------------------------------------------------------
 export const logout = catchAsync(async (req: Request, res: Response) => {
   const rawRefreshToken = extractRefreshToken(req);
+  const userId = req.user?.sub;
+
   if (rawRefreshToken) {
-    await revokeRefreshToken(rawRefreshToken);
+    await revokeRefreshToken(rawRefreshToken, userId);
   }
 
+  // Clear both auth cookies (refreshToken at /api/auth, accessToken at /)
   clearAuthCookies(res);
 
   sendResponse(res, {

@@ -529,12 +529,14 @@ export async function refreshAccessToken(
 
 export async function revokeRefreshToken(
   rawRefreshToken: string,
+  userId?: string,
 ): Promise<void> {
   try {
     const tokenHash = hashToken(rawRefreshToken);
     await prisma.refreshToken.updateMany({
       where: {
         tokenHash,
+        ...(userId ? { userId } : {}),
         revokedAt: null,
       },
       data: {

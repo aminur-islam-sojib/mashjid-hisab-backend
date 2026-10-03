@@ -42,8 +42,8 @@ authRouter.get("/me", authenticate, getMe);
 
 /**
  * POST /api/auth/logout
- * Revokes refresh token in the database and clears authentication cookies.
+ * Authenticated — revokes the current refresh token server-side and clears cookies.
  */
-authRouter.post("/logout", logout);
+authRouter.post("/logout", authenticate, logout);
 
 export default authRouter;
