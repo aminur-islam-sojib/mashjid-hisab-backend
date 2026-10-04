@@ -11,6 +11,7 @@ import {
   getUserMosquesHandler,
   getMosqueSettingsHandler,
   updateMosqueHandler,
+  archiveMosqueHandler,
 } from "./mosque.controller.js";
 
 const mosqueRouter: Router = Router();
@@ -49,6 +50,20 @@ mosqueRouter.patch(
   authenticate,
   requireMosqueMembership(Role.MOSQUE_ADMIN),
   updateMosqueHandler,
+);
+
+/**
+ * POST /api/mosques/:mosqueId/archive
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Soft-deletes the mosque (sets isArchived: true).
+ * Blocks if there are unresolved pending invites or active accounts with non-zero balance.
+ */
+mosqueRouter.post(
+  "/:mosqueId/archive",
+  authenticate,
+  requireMosqueMembership(Role.MOSQUE_ADMIN),
+  archiveMosqueHandler,
 );
 
 /**

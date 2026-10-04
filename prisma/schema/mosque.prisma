@@ -25,6 +25,10 @@ model Mosque {
   /// Default: 7 (July), matching the Bangladesh Government fiscal calendar.
   fiscalYearStart Int      @default(7)
 
+  // -- Soft delete / lifecycle ----------------------------------------------
+  isArchived      Boolean  @default(false)
+  archivedAt      DateTime?
+
   // -- Timestamps -----------------------------------------------------------
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

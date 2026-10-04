@@ -16,6 +16,7 @@ import {
   getUserMosques,
   getMosqueSettings,
   updateMosque,
+  archiveMosque,
 } from "./mosque.service.js";
 
 /**
@@ -105,6 +106,27 @@ export const updateMosqueHandler = catchAsync(
       statusCode: 200,
       message: "Mosque settings updated successfully.",
       data: updatedSettings,
+    });
+  },
+);
+
+/**
+ * POST /api/mosques/:mosqueId/archive
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Soft-deletes the mosque (sets isArchived: true).
+ * Blocks if there are unresolved pending invites or active accounts with non-zero balance.
+ */
+export const archiveMosqueHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+
+    const archivedMosque = await archiveMosque(mosqueId);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Mosque archived successfully.",
+      data: archivedMosque,
     });
   },
 );

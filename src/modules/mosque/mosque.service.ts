@@ -9,6 +9,7 @@ import {
   Role,
   MembershipStatus,
   UserStatus,
+  InviteStatus,
   type Mosque,
   type Membership,
   Prisma,
@@ -57,9 +58,19 @@ export interface MosqueSettings {
   address: string | null;
   timezone: string;
   fiscalYearStart: number;
+  isArchived: boolean;
+  archivedAt: Date | null;
   role: Role;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface ArchiveMosqueResult {
+  id: string;
+  name: string;
+  slug: string;
+  isArchived: boolean;
+  archivedAt: Date | null;
 }
 
 /**
@@ -227,16 +238,17 @@ export async function getUserMosques(
     where: {
       userId,
       status: MembershipStatus.ACTIVE,
-      ...(options?.search
-        ? {
-            mosque: {
+      mosque: {
+        isArchived: false,
+        ...(options?.search
+          ? {
               OR: [
                 { name: { contains: options.search, mode: "insensitive" } },
                 { slug: { contains: options.search, mode: "insensitive" } },
               ],
-            },
-          }
-        : {}),
+            }
+          : {}),
+      },
     },
     select: {
       id: true,
@@ -351,6 +363,8 @@ export async function getMosqueSettings(
           address: true,
           timezone: true,
           fiscalYearStart: true,
+          isArchived: true,
+          archivedAt: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -372,6 +386,8 @@ export async function getMosqueSettings(
     address: membership.mosque.address,
     timezone: membership.mosque.timezone,
     fiscalYearStart: membership.mosque.fiscalYearStart,
+    isArchived: membership.mosque.isArchived,
+    archivedAt: membership.mosque.archivedAt,
     role: membership.role,
     createdAt: membership.mosque.createdAt,
     updatedAt: membership.mosque.updatedAt,
@@ -403,6 +419,13 @@ export async function updateMosque(
 
   if (!currentMosque) {
     throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
+  }
+
+  if (currentMosque.isArchived) {
+    throw HttpError.badRequest(
+      "Cannot update settings: This mosque has been archived.",
+      "MOSQUE_ARCHIVED",
+    );
   }
 
   // 2. Fiscal year start change guard:
@@ -444,6 +467,8 @@ export async function updateMosque(
       address: true,
       timezone: true,
       fiscalYearStart: true,
+      isArchived: true,
+      archivedAt: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -453,4 +478,91 @@ export async function updateMosque(
     ...updatedMosque,
     role: Role.MOSQUE_ADMIN,
   };
+}
+
+/**
+ * Soft-deletes a mosque tenant by setting `isArchived: true` and recording `archivedAt`.
+ *
+ * Safety rails enforced:
+ * 1. Blocks if the mosque is already archived.
+ * 2. Blocks if there are unresolved active invitations (`status: PENDING` and not expired).
+ * 3. Blocks if there are active accounts/funds with non-zero balance.
+ *
+ * @param mosqueId - Target mosque unique ID.
+ * @returns The archived mosque record.
+ */
+export async function archiveMosque(mosqueId: string): Promise<ArchiveMosqueResult> {
+  // 1. Fetch current mosque
+  const mosque = await prisma.mosque.findUnique({
+    where: { id: mosqueId },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      isArchived: true,
+    },
+  });
+
+  if (!mosque) {
+    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
+  }
+
+  if (mosque.isArchived) {
+    throw HttpError.badRequest(
+      "Operation rejected: Mosque is already archived.",
+      "MOSQUE_ALREADY_ARCHIVED",
+    );
+  }
+
+  // 2. Safety Rail: Check for unresolved pending membership invitations
+  const pendingInvitesCount = await prisma.membershipInvite.count({
+    where: {
+      mosqueId,
+      status: InviteStatus.PENDING,
+      expiresAt: { gt: new Date() },
+    },
+  });
+
+  if (pendingInvitesCount > 0) {
+    throw HttpError.badRequest(
+      `Cannot archive mosque: There are ${pendingInvitesCount} unresolved pending invitation(s). Please revoke or resolve pending invites before archiving.`,
+      "MOSQUE_ARCHIVE_BLOCKED_PENDING_INVITES",
+    );
+  }
+
+  // 3. Safety Rail: Check for active accounts with non-zero balance
+  const activeAccountsWithBalance = await prisma.account.findMany({
+    where: {
+      mosqueId,
+      isArchived: false,
+      openingBalance: { not: 0n },
+    },
+    select: { id: true, name: true, openingBalance: true },
+  });
+
+  if (activeAccountsWithBalance.length > 0) {
+    const accountNames = activeAccountsWithBalance.map((a) => a.name).join(", ");
+    throw HttpError.badRequest(
+      `Cannot archive mosque: There are active accounts with non-zero balances (${accountNames}). All accounts must be settled or zeroed out before archiving.`,
+      "MOSQUE_ARCHIVE_BLOCKED_NON_ZERO_BALANCE",
+    );
+  }
+
+  // 4. Soft-delete the mosque
+  const archived = await prisma.mosque.update({
+    where: { id: mosqueId },
+    data: {
+      isArchived: true,
+      archivedAt: new Date(),
+    },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      isArchived: true,
+      archivedAt: true,
+    },
+  });
+
+  return archived;
 }
