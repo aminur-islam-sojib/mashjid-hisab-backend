@@ -73,6 +73,12 @@ export interface ArchiveMosqueResult {
   archivedAt: Date | null;
 }
 
+export interface PublicMosqueProfile {
+  name: string;
+  slug: string;
+  address: string | null;
+}
+
 /**
  * Reusable security helper: Verifies user exists and account status is ACTIVE.
  * Throws HttpError if missing, blocked, or inactive.
@@ -210,6 +216,39 @@ export async function getMosqueBySlug(slug: string): Promise<Mosque | null> {
   return prisma.mosque.findUnique({
     where: { slug },
   });
+}
+
+/**
+ * Retrieves a minimal public record for a mosque by slug for the transparency page.
+ *
+ * Security & privacy guarantees:
+ * - Public access: No authentication required.
+ * - Minimal data exposure: Returns only name, slug, and address.
+ * - Strictly strips all internal IDs, account numbers, and membership lists.
+ * - Soft-delete check: Returns 404 if mosque is not found or is archived.
+ */
+export async function getPublicMosqueBySlug(
+  slug: string,
+): Promise<PublicMosqueProfile> {
+  const mosque = await prisma.mosque.findUnique({
+    where: { slug },
+    select: {
+      name: true,
+      slug: true,
+      address: true,
+      isArchived: true,
+    },
+  });
+
+  if (!mosque || mosque.isArchived) {
+    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
+  }
+
+  return {
+    name: mosque.name,
+    slug: mosque.slug,
+    address: mosque.address,
+  };
 }
 
 /**

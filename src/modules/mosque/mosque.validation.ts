@@ -50,6 +50,23 @@ export function validateMosqueIdParam(param: unknown): string {
 }
 
 /**
+ * Validates route parameter :slug for public mosque endpoints.
+ */
+export function validateMosqueSlugParam(param: unknown): string {
+  if (typeof param !== "string" || !param.trim()) {
+    throw HttpError.badRequest("Mosque slug is required.", "INVALID_MOSQUE_SLUG");
+  }
+  const slug = param.trim().toLowerCase();
+  if (!isValidSlug(slug)) {
+    throw HttpError.badRequest(
+      "Slug must be 3-60 lowercase alphanumeric characters and hyphens (e.g. 'baitul-aman').",
+      "INVALID_MOSQUE_SLUG",
+    );
+  }
+  return slug;
+}
+
+/**
  * Validates IANA timezone strings using native V8 Intl support.
  */
 export function isValidTimezone(tz: string): boolean {

@@ -12,6 +12,7 @@ import {
   getMosqueSettingsHandler,
   updateMosqueHandler,
   archiveMosqueHandler,
+  getPublicMosqueBySlugHandler,
 } from "./mosque.controller.js";
 
 const mosqueRouter: Router = Router();
@@ -76,4 +77,19 @@ mosqueRouter.post(
  */
 mosqueRouter.post("/", authenticate, createMosqueHandler);
 
+// ---------------------------------------------------------------------------
+// Public Mosque Router — Unauthenticated Public Record Endpoints
+// ---------------------------------------------------------------------------
+const publicMosqueRouter: Router = Router();
+
+/**
+ * GET /api/public/mosques/:slug
+ * Access: Public
+ *
+ * Minimal public record for the transparency page: name, address, donation-progress summary later.
+ * No internal IDs, no account numbers, no member list.
+ */
+publicMosqueRouter.get("/:slug", getPublicMosqueBySlugHandler);
+
+export { publicMosqueRouter };
 export default mosqueRouter;

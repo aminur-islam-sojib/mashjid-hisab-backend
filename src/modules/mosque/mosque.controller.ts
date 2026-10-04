@@ -9,6 +9,7 @@ import {
   validateCreateMosqueInput,
   validateGetUserMosquesQuery,
   validateMosqueIdParam,
+  validateMosqueSlugParam,
   validateUpdateMosqueInput,
 } from "./mosque.validation.js";
 import {
@@ -17,6 +18,7 @@ import {
   getMosqueSettings,
   updateMosque,
   archiveMosque,
+  getPublicMosqueBySlug,
 } from "./mosque.service.js";
 
 /**
@@ -127,6 +129,27 @@ export const archiveMosqueHandler = catchAsync(
       statusCode: 200,
       message: "Mosque archived successfully.",
       data: archivedMosque,
+    });
+  },
+);
+
+/**
+ * GET /api/public/mosques/:slug
+ * Access: Public
+ *
+ * Minimal public record for the transparency page: name, address, donation-progress summary later.
+ * No internal IDs, no account numbers, no member list.
+ */
+export const getPublicMosqueBySlugHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const slug = validateMosqueSlugParam(req.params["slug"]);
+
+    const mosque = await getPublicMosqueBySlug(slug);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Mosque public record retrieved successfully.",
+      data: mosque,
     });
   },
 );
