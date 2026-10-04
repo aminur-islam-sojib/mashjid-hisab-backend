@@ -38,9 +38,10 @@ model User {
   // -- Relations ------------------------------------------------------------
   profile  Profile?
   /// All mosque memberships this user holds (zero or many).
-  memberships Membership[] @relation("UserMemberships")
+  memberships             Membership[]          @relation("UserMemberships")
   /// Invites this user has sent to others.
-  sentInvites Membership[] @relation("InvitedBy")
+  sentInvites             Membership[]          @relation("InvitedBy")
+  sentMembershipInvites   MembershipInvite[]    @relation("InviteSentBy")
 
   refreshTokens           RefreshToken[]
   passwordResetTokens     PasswordResetToken[]

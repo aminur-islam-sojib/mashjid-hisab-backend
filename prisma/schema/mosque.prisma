@@ -11,26 +11,30 @@
 // =============================================================================
 
 model Mosque {
-  id      String  @id @default(cuid())
-  name    String
+  id              String   @id @default(cuid())
+  name            String
   /// URL-safe identifier used in /m/{slug} routes and the switch-mosque UI.
-  slug    String  @unique
-  address String?
+  slug            String   @unique
+  address         String?
 
   /// IANA timezone, e.g. "Asia/Dhaka". Used for prayer-time calculations and
   /// report date boundaries.
-  timezone String @default("Asia/Dhaka")
+  timezone        String   @default("Asia/Dhaka")
 
   /// Month number (1–12) at which the mosque's fiscal year begins.
   /// Default: 7 (July), matching the Bangladesh Government fiscal calendar.
-  fiscalYearStart Int @default(7)
+  fiscalYearStart Int      @default(7)
 
   // -- Timestamps -----------------------------------------------------------
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   // -- Relations ------------------------------------------------------------
-  memberships Membership[]
+  memberships     Membership[]
+  invites         MembershipInvite[]
+  funds           Fund[]
+  accounts        Account[]
+  categories      Category[]
 
   @@map("mosques")
 }

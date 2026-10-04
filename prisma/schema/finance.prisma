@@ -1,0 +1,85 @@
+// =============================================================================
+// finance.prisma — Domain B: Funds, Accounts, and Categories
+//
+// Design notes:
+//  • Fund    = WHY the money exists (Zakat, Construction, General, etc.)
+//  • Account = WHERE it physically sits (Cash safe, Bank A/C, bKash wallet)
+//  • Two independent dimensions: A single bank Account can hold balances
+//    belonging to multiple Funds at once.
+//  • Category = Classification for income/expense. If fundId is set, that
+//    category is locked strictly to that fund (e.g. Zakat categories).
+//  • Monetary values use BigInt minor units (poisha), never floats.
+// =============================================================================
+
+model Fund {
+  id           String   @id @default(cuid())
+  mosqueId     String
+  mosque       Mosque   @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  name         String
+  type         FundType @default(GENERAL)
+
+  // True for Zakat, Waqf, etc. — enforced in the service layer: a restricted
+  // fund's Transactions may only use Categories explicitly linked to it.
+  isRestricted Boolean  @default(false)
+
+  description  String?
+  isArchived   Boolean  @default(false)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  categories   Category[]
+
+  @@unique([mosqueId, name])
+  @@index([mosqueId])
+  @@map("funds")
+}
+
+model Account {
+  id             String      @id @default(cuid())
+  mosqueId       String
+  mosque         Mosque      @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  name           String
+  type           AccountType @default(CASH)
+  accountNumber  String?     // bank A/C no. or wallet number, optional
+
+  // Integer minor units (poisha), never a float — same rule as the ledger.
+  // BigInt headroom instead of Int: a mosque's lifetime balance shouldn't
+  // risk hitting Int's ~21 million-taka ceiling.
+  openingBalance BigInt      @default(0)
+
+  isArchived     Boolean     @default(false)
+
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@unique([mosqueId, name])
+  @@index([mosqueId])
+  @@map("accounts")
+}
+
+model Category {
+  id         String       @id @default(cuid())
+  mosqueId   String
+  mosque     Mosque       @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  // null = usable with any fund. Set = restricted to this one fund only
+  // (this is how Zakat's 8 categories get locked away from General spend).
+  fundId     String?
+  fund       Fund?        @relation(fields: [fundId], references: [id], onDelete: Cascade)
+
+  name       String
+  type       CategoryType
+
+  isArchived Boolean      @default(false)
+
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@unique([mosqueId, name, type])
+  @@index([mosqueId])
+  @@index([fundId])
+  @@map("categories")
+}

@@ -21,8 +21,56 @@ enum Role {
 // Drives access control: only ACTIVE memberships are allowed through guards.
 // ---------------------------------------------------------------------------
 enum MembershipStatus {
-  PENDING   // invite sent; user has not yet accepted
+  PENDING   // created directly with a userId already known (rare path)
   ACTIVE    // full access granted
   SUSPENDED // access revoked without deleting audit history
   REJECTED  // invite explicitly declined by the invitee
+}
+
+// ---------------------------------------------------------------------------
+// InviteStatus
+// Lifecycle of an invitation to join a mosque.
+// ---------------------------------------------------------------------------
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+// ---------------------------------------------------------------------------
+// FundType
+// Classification of financial funds by Shariah and operational purpose.
+// ---------------------------------------------------------------------------
+enum FundType {
+  GENERAL      // unrestricted — spendable on anything
+  ZAKAT        // restricted — only the 8 shariah categories
+  SADAQAH
+  CONSTRUCTION
+  MADRASA
+  QURBANI
+  WAQF         // property/rent income — disbursement-only by policy
+  IFTAR
+  OTHER
+}
+
+// ---------------------------------------------------------------------------
+// AccountType
+// Physical/digital location where money is held.
+// ---------------------------------------------------------------------------
+enum AccountType {
+  CASH
+  BANK
+  MOBILE_WALLET // bKash, Nagad, etc.
+  CARD
+  OTHER
+}
+
+// ---------------------------------------------------------------------------
+// CategoryType
+// Direction of cash flow.
+// ---------------------------------------------------------------------------
+enum CategoryType {
+  INCOME
+  EXPENSE
 }
