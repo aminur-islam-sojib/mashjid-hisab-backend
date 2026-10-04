@@ -9,6 +9,7 @@
 // ---------------------------------------------------------------------------
 
 import type { AccessTokenPayload } from "../utils/token.js";
+import type { Membership } from "../../generated/prisma/client.js";
 
 declare global {
   namespace Express {
@@ -18,6 +19,17 @@ declare global {
        * is verified. Undefined on unauthenticated/public routes.
        */
       user?: AccessTokenPayload;
+
+      /**
+       * Populated by `requireMosqueMembership` middleware after verifying the caller's
+       * live active membership in the mosque identified by :mosqueId.
+       */
+      membership?: Membership;
+
+      /**
+       * Validated mosqueId extracted from params by tenant middlewares.
+       */
+      mosqueId?: string;
     }
   }
 }
