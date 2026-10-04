@@ -20,6 +20,64 @@ export interface CreateMosqueResult {
   membership: Membership;
 }
 
+export interface GetUserMosquesOptions {
+  currentMosqueId?: string | null;
+  search?: string;
+}
+
+export interface UserMosqueItem {
+  id: string;
+  name: string;
+  slug: string;
+  address: string | null;
+  timezone: string;
+  fiscalYearStart: number;
+  role: Role;
+  membershipId: string;
+  membershipStatus: MembershipStatus;
+  isCurrent: boolean;
+  joinedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  membership: {
+    id: string;
+    role: Role;
+    status: MembershipStatus;
+    createdAt: Date;
+  };
+}
+
+/**
+ * Reusable security helper: Verifies user exists and account status is ACTIVE.
+ * Throws HttpError if missing, blocked, or inactive.
+ */
+export async function assertActiveUser(userId: string) {
+  const caller = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, status: true },
+  });
+
+  if (!caller) {
+    throw HttpError.notFound("User account not found.", "USER_NOT_FOUND");
+  }
+
+  if (caller.status === UserStatus.BLOCKED) {
+    throw HttpError.forbidden(
+      "Your account has been blocked. Please contact support.",
+      "ACCOUNT_BLOCKED",
+    );
+  }
+
+  if (caller.status === UserStatus.INACTIVE) {
+    throw HttpError.forbidden(
+      "Your account is inactive. Please activate your account first.",
+      "ACCOUNT_INACTIVE",
+    );
+  }
+
+  return caller;
+}
+
 /**
  * Creates a new Mosque tenant and immediately assigns the creator as an
  * ACTIVE MOSQUE_ADMIN within the same atomic database transaction.
@@ -35,28 +93,7 @@ export async function createMosque(
   input: CreateMosqueInput,
 ): Promise<CreateMosqueResult> {
   // 1. Verify caller user exists and is in good standing
-  const caller = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { id: true, status: true },
-  });
-
-  if (!caller) {
-    throw HttpError.notFound("User account not found.", "USER_NOT_FOUND");
-  }
-
-  if (caller.status === UserStatus.BLOCKED) {
-    throw HttpError.forbidden(
-      "Your account has been blocked. You cannot create a mosque tenant.",
-      "ACCOUNT_BLOCKED",
-    );
-  }
-
-  if (caller.status === UserStatus.INACTIVE) {
-    throw HttpError.forbidden(
-      "Your account is inactive. Please activate your account first.",
-      "ACCOUNT_INACTIVE",
-    );
-  }
+  await assertActiveUser(userId);
 
   // 2. Resolve Slug
   let finalSlug: string;
@@ -146,5 +183,115 @@ export async function getMosqueById(mosqueId: string): Promise<Mosque | null> {
 export async function getMosqueBySlug(slug: string): Promise<Mosque | null> {
   return prisma.mosque.findUnique({
     where: { slug },
+  });
+}
+
+/**
+ * Lists every mosque the caller has an ACTIVE Membership in.
+ * Powers the multi-tenant mosque switcher UI.
+ *
+ * Security guarantees:
+ * 1. Caller account state: Verifies user exists and account is ACTIVE (not BLOCKED/INACTIVE).
+ * 2. Membership status filter: Excludes PENDING, SUSPENDED, and REJECTED memberships.
+ * 3. Tenant isolation: Strictly scopes results to caller's own memberships.
+ * 4. Contextual identification: Accurately flags `isCurrent` matching current active session context.
+ *
+ * @param userId - Caller's unique user ID.
+ * @param options - Optional context parameters including `currentMosqueId` and search term.
+ * @returns Array of formatted mosque items with membership context.
+ */
+export async function getUserMosques(
+  userId: string,
+  options?: GetUserMosquesOptions,
+): Promise<UserMosqueItem[]> {
+  // 1. Live account status check (ensures blocked/inactive callers cannot view tenant data)
+  await assertActiveUser(userId);
+
+  // 2. Query all ACTIVE memberships with associated mosque data
+  const memberships = await prisma.membership.findMany({
+    where: {
+      userId,
+      status: MembershipStatus.ACTIVE,
+      ...(options?.search
+        ? {
+            mosque: {
+              OR: [
+                { name: { contains: options.search, mode: "insensitive" } },
+                { slug: { contains: options.search, mode: "insensitive" } },
+              ],
+            },
+          }
+        : {}),
+    },
+    select: {
+      id: true,
+      mosqueId: true,
+      role: true,
+      status: true,
+      createdAt: true,
+      mosque: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          address: true,
+          timezone: true,
+          fiscalYearStart: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+    },
+    orderBy: {
+      createdAt: "asc",
+    },
+  });
+
+  const currentMosqueId = options?.currentMosqueId ?? null;
+
+  // 3. Map into clean, fully-typed UI-ready DTO
+  return memberships.map((m) => {
+    const isCurrent = currentMosqueId
+      ? m.mosqueId === currentMosqueId
+      : memberships.length === 1;
+
+    return {
+      id: m.mosque.id,
+      name: m.mosque.name,
+      slug: m.mosque.slug,
+      address: m.mosque.address,
+      timezone: m.mosque.timezone,
+      fiscalYearStart: m.mosque.fiscalYearStart,
+      role: m.role,
+      membershipId: m.id,
+      membershipStatus: m.status,
+      isCurrent,
+      joinedAt: m.createdAt,
+      createdAt: m.mosque.createdAt,
+      updatedAt: m.mosque.updatedAt,
+      membership: {
+        id: m.id,
+        role: m.role,
+        status: m.status,
+        createdAt: m.createdAt,
+      },
+    };
+  });
+}
+
+/**
+ * Reusable helper: Retrieves caller's active membership in a specific mosque.
+ * Returns null if the user does not hold an ACTIVE membership in the target mosque.
+ */
+export async function getUserActiveMembership(
+  userId: string,
+  mosqueId: string,
+): Promise<Membership | null> {
+  return prisma.membership.findFirst({
+    where: {
+      userId,
+      mosqueId,
+      status: MembershipStatus.ACTIVE,
+    },
   });
 }

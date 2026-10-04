@@ -42,6 +42,27 @@ export function globalErrorHandler(
   }
 
   // -------------------------------------------------------------------------
+  // Body-parser malformed JSON syntax error (400 Bad Request)
+  // -------------------------------------------------------------------------
+  if (
+    err instanceof SyntaxError &&
+    "status" in err &&
+    (err as { status: unknown }).status === 400 &&
+    "body" in err
+  ) {
+    res.status(400).json({
+      success: false,
+      error: {
+        code: "INVALID_JSON_BODY",
+        message:
+          "Malformed JSON in request body. Ensure valid JSON syntax: remove trailing commas, use double quotes for property names, and do not wrap the body in extra outer quotes.",
+        details: null,
+      },
+    });
+    return;
+  }
+
+  // -------------------------------------------------------------------------
   // Unknown / unexpected error
   // Log the full error server-side; send a generic message to the client.
   // Never leak stack traces or internal details in production.

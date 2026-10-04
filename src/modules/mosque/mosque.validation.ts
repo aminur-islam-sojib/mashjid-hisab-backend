@@ -13,6 +13,32 @@ export interface CreateMosqueInput {
   fiscalYearStart?: number;
 }
 
+export interface GetUserMosquesQuery {
+  search?: string;
+}
+
+/**
+ * Validates query parameters for GET /api/mosques
+ */
+export function validateGetUserMosquesQuery(query: unknown): GetUserMosquesQuery {
+  if (!query || typeof query !== "object") return {};
+  const raw = query as Record<string, unknown>;
+  const result: GetUserMosquesQuery = {};
+
+  if (raw["search"] !== undefined && raw["search"] !== null && raw["search"] !== "") {
+    if (typeof raw["search"] !== "string") {
+      throw HttpError.badRequest("Search query must be a string.");
+    }
+    const trimmed = raw["search"].trim();
+    if (trimmed.length > 100) {
+      throw HttpError.badRequest("Search query cannot exceed 100 characters.");
+    }
+    result.search = trimmed;
+  }
+
+  return result;
+}
+
 /**
  * Validates IANA timezone strings using native V8 Intl support.
  */

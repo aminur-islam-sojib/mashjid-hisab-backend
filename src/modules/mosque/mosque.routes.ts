@@ -4,9 +4,20 @@
 
 import { Router } from "express";
 import { authenticate } from "../../middlewares/auth.middleware.js";
-import { createMosqueHandler } from "./mosque.controller.js";
+import {
+  createMosqueHandler,
+  getUserMosquesHandler,
+} from "./mosque.controller.js";
 
 const mosqueRouter: Router = Router();
+
+/**
+ * GET /api/mosques
+ * Access: Authenticated
+ *
+ * Lists every mosque the caller has an ACTIVE Membership in — powers the mosque switcher.
+ */
+mosqueRouter.get("/", authenticate, getUserMosquesHandler);
 
 /**
  * POST /api/mosques
