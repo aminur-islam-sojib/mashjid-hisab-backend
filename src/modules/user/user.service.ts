@@ -71,6 +71,7 @@ export async function updateUserProfile(
       phone: true,
       locale: true,
       emailVerified: true,
+      status: true,
       profile: {
         select: {
           avatarUrl: true,

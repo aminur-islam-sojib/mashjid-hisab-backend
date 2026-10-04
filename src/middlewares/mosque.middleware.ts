@@ -15,6 +15,7 @@ import { HttpError } from "../errors/HttpError.js";
 import {
   Role,
   MembershipStatus,
+  UserStatus,
   type Membership,
   type Prisma,
   type PrismaClient,
@@ -85,13 +86,26 @@ export function requireMosqueMembership(...allowedRoles: Role[]) {
             mosqueId: mosqueId.trim(),
           },
         },
+        include: {
+          user: {
+            select: { status: true },
+          },
+        },
       });
 
-      // 4. Must exist and be ACTIVE
+      // 4. Must exist and membership must be ACTIVE
       if (!membership || membership.status !== MembershipStatus.ACTIVE) {
         throw HttpError.forbidden(
           "Access denied. You do not hold an active membership in this mosque.",
           "FORBIDDEN_MEMBERSHIP_INACTIVE",
+        );
+      }
+
+      // 4b. Global user account must be ACTIVE
+      if (membership.user.status !== UserStatus.ACTIVE) {
+        throw HttpError.forbidden(
+          "Access denied. Your user account is inactive or blocked.",
+          "ACCOUNT_INACTIVE",
         );
       }
 

@@ -40,6 +40,7 @@ import type {
 import {
   MembershipStatus,
   Role,
+  UserStatus,
   type Membership,
 } from "../../../generated/prisma/client.js";
 
@@ -59,6 +60,7 @@ export interface PublicUser {
   phone: string | null;
   locale: string;
   emailVerified: boolean;
+  status: UserStatus;
 }
 
 // ---------------------------------------------------------------------------
@@ -263,6 +265,7 @@ export async function registerUser(
           phone: true,
           locale: true,
           emailVerified: true,
+          status: true,
           sessionVersion: true,
         },
       });
@@ -324,6 +327,7 @@ export async function registerUser(
       phone: createdUser.phone ?? null,
       locale: createdUser.locale,
       emailVerified: createdUser.emailVerified,
+      status: createdUser.status,
     },
     memberships,
     accessToken,
@@ -359,6 +363,7 @@ export async function loginUser(
       phone: true,
       locale: true,
       emailVerified: true,
+      status: true,
       passwordHash: true,
       sessionVersion: true,
     },
@@ -375,6 +380,23 @@ export async function loginUser(
     throw HttpError.unauthorized(
       "Email or password is incorrect.",
       "AUTH_INVALID_CREDENTIALS",
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // 2b. Account status check — block banned / deactivated accounts immediately
+  // -------------------------------------------------------------------------
+  if (user.status === UserStatus.BLOCKED) {
+    throw HttpError.forbidden(
+      "Your account has been blocked. Please contact support.",
+      "ACCOUNT_BLOCKED",
+    );
+  }
+
+  if (user.status === UserStatus.INACTIVE) {
+    throw HttpError.forbidden(
+      "Your account is inactive. Please contact support to reactivate your account.",
+      "ACCOUNT_INACTIVE",
     );
   }
 
@@ -429,6 +451,7 @@ export async function loginUser(
       phone: user.phone ?? null,
       locale: user.locale,
       emailVerified: user.emailVerified,
+      status: user.status,
     },
     activeMosqueId: activeMembership?.mosqueId ?? null,
     role: activeMembership?.role ?? null,
@@ -477,6 +500,7 @@ export async function refreshAccessToken(
       user: {
         select: {
           id: true,
+          status: true,
           sessionVersion: true,
         },
       },
@@ -487,6 +511,14 @@ export async function refreshAccessToken(
     throw HttpError.unauthorized(
       "Refresh token is invalid or unrecognized.",
       "AUTH_REFRESH_TOKEN_INVALID",
+    );
+  }
+
+  // 3b. Account status check
+  if (storedToken.user.status !== UserStatus.ACTIVE) {
+    throw HttpError.forbidden(
+      "Your account is inactive or blocked.",
+      "ACCOUNT_INACTIVE",
     );
   }
 
@@ -578,6 +610,7 @@ export async function getAuthenticatedUser(
       phone: true,
       locale: true,
       emailVerified: true,
+      status: true,
       memberships: {
         where: { status: MembershipStatus.ACTIVE },
         select: {
@@ -600,6 +633,13 @@ export async function getAuthenticatedUser(
     );
   }
 
+  if (user.status === UserStatus.BLOCKED) {
+    throw HttpError.forbidden(
+      "Your account has been blocked. Please contact support.",
+      "ACCOUNT_BLOCKED",
+    );
+  }
+
   // Resolve current active membership
   let active = user.memberships.find((m) => m.mosqueId === activeMosqueId);
   if (!active && user.memberships.length === 1) {
@@ -614,6 +654,7 @@ export async function getAuthenticatedUser(
       phone: user.phone ?? null,
       locale: user.locale,
       emailVerified: user.emailVerified,
+      status: user.status,
     },
     activeMosqueId: active?.mosqueId ?? null,
     role: active?.role ?? null,

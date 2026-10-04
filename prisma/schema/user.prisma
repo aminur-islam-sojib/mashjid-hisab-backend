@@ -20,7 +20,8 @@ model User {
   passwordHash String
 
   // -- Verification / account state ----------------------------------------
-  emailVerified Boolean @default(false)
+  emailVerified Boolean    @default(false)
+  status        UserStatus @default(ACTIVE)
 
   // -- Localisation ---------------------------------------------------------
   /// IETF locale tag, e.g. "bn", "en". Drives UI language & number formats.

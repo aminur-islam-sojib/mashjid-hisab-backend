@@ -8,6 +8,7 @@ import { generateUniqueSlug } from "../../utils/slug.js";
 import {
   Role,
   MembershipStatus,
+  UserStatus,
   type Mosque,
   type Membership,
   Prisma,
@@ -27,20 +28,34 @@ export interface CreateMosqueResult {
  * 1. Atomicity: The mosque cannot exist without its founding admin membership.
  * 2. Slug uniqueness: Explicit slug collision throws 409 Conflict; auto-generated
  *    slugs resolve collisions automatically.
- * 3. Validation: Caller must exist as a registered User.
+ * 3. Validation: Caller must exist and have ACTIVE account status.
  */
 export async function createMosque(
   userId: string,
   input: CreateMosqueInput,
 ): Promise<CreateMosqueResult> {
-  // 1. Verify caller user exists
+  // 1. Verify caller user exists and is in good standing
   const caller = await prisma.user.findUnique({
     where: { id: userId },
-    select: { id: true },
+    select: { id: true, status: true },
   });
 
   if (!caller) {
     throw HttpError.notFound("User account not found.", "USER_NOT_FOUND");
+  }
+
+  if (caller.status === UserStatus.BLOCKED) {
+    throw HttpError.forbidden(
+      "Your account has been blocked. You cannot create a mosque tenant.",
+      "ACCOUNT_BLOCKED",
+    );
+  }
+
+  if (caller.status === UserStatus.INACTIVE) {
+    throw HttpError.forbidden(
+      "Your account is inactive. Please activate your account first.",
+      "ACCOUNT_INACTIVE",
+    );
   }
 
   // 2. Resolve Slug

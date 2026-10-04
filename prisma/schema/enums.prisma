@@ -28,6 +28,16 @@ enum MembershipStatus {
 }
 
 // ---------------------------------------------------------------------------
+// UserStatus
+// Platform-level account state for the User.
+// ---------------------------------------------------------------------------
+enum UserStatus {
+  ACTIVE   // account in good standing
+  INACTIVE // voluntarily deactivated or dormant
+  BLOCKED  // banned / administratively blocked platform-wide
+}
+
+// ---------------------------------------------------------------------------
 // InviteStatus
 // Lifecycle of an invitation to join a mosque.
 // ---------------------------------------------------------------------------
