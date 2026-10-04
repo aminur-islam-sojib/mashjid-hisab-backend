@@ -40,6 +40,16 @@ export function validateGetUserMosquesQuery(query: unknown): GetUserMosquesQuery
 }
 
 /**
+ * Validates route parameter :mosqueId
+ */
+export function validateMosqueIdParam(param: unknown): string {
+  if (typeof param !== "string" || !param.trim()) {
+    throw HttpError.badRequest("Mosque identifier is required.", "INVALID_MOSQUE_ID");
+  }
+  return param.trim();
+}
+
+/**
  * Validates IANA timezone strings using native V8 Intl support.
  */
 export function isValidTimezone(tz: string): boolean {

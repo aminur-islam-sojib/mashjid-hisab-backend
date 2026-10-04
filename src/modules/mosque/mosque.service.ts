@@ -47,6 +47,18 @@ export interface UserMosqueItem {
   };
 }
 
+export interface MosqueSettings {
+  id: string;
+  name: string;
+  slug: string;
+  address: string | null;
+  timezone: string;
+  fiscalYearStart: number;
+  role: Role;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 /**
  * Reusable security helper: Verifies user exists and account status is ACTIVE.
  * Throws HttpError if missing, blocked, or inactive.
@@ -294,4 +306,71 @@ export async function getUserActiveMembership(
       status: MembershipStatus.ACTIVE,
     },
   });
+}
+
+/**
+ * Retrieves full mosque settings for an active member.
+ *
+ * Security & anti-enumeration guarantee:
+ * Throws 404 Not Found (never 403 Forbidden) if the caller holds no ACTIVE
+ * membership in the mosque or if the mosque does not exist, completely
+ * preventing attackers from probing the existence of private tenants.
+ *
+ * @param userId - Caller's unique user ID.
+ * @param mosqueId - Target mosque ID or slug.
+ * @returns Full mosque settings object with caller's effective role.
+ */
+export async function getMosqueSettings(
+  userId: string,
+  mosqueId: string,
+): Promise<MosqueSettings> {
+  // 1. Account status verification (ensure caller is not blocked or inactive)
+  await assertActiveUser(userId);
+
+  // 2. Query membership and join mosque data atomically.
+  // Supports lookup by both mosque cuid and unique slug.
+  const membership = await prisma.membership.findFirst({
+    where: {
+      userId,
+      status: MembershipStatus.ACTIVE,
+      OR: [
+        { mosqueId },
+        { mosque: { slug: mosqueId } },
+      ],
+    },
+    select: {
+      role: true,
+      mosque: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          address: true,
+          timezone: true,
+          fiscalYearStart: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+    },
+  });
+
+  // 3. Anti-enumeration security check:
+  // Return 404 Not Found if no active membership exists.
+  // Does not disclose whether the tenant exists or whether caller lacks permission.
+  if (!membership || !membership.mosque) {
+    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
+  }
+
+  return {
+    id: membership.mosque.id,
+    name: membership.mosque.name,
+    slug: membership.mosque.slug,
+    address: membership.mosque.address,
+    timezone: membership.mosque.timezone,
+    fiscalYearStart: membership.mosque.fiscalYearStart,
+    role: membership.role,
+    createdAt: membership.mosque.createdAt,
+    updatedAt: membership.mosque.updatedAt,
+  };
 }

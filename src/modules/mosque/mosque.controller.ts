@@ -8,8 +8,13 @@ import { sendResponse } from "../../utils/sendResponse.js";
 import {
   validateCreateMosqueInput,
   validateGetUserMosquesQuery,
+  validateMosqueIdParam,
 } from "./mosque.validation.js";
-import { createMosque, getUserMosques } from "./mosque.service.js";
+import {
+  createMosque,
+  getUserMosques,
+  getMosqueSettings,
+} from "./mosque.service.js";
 
 /**
  * POST /api/mosques
@@ -54,6 +59,28 @@ export const getUserMosquesHandler = catchAsync(
       statusCode: 200,
       message: "Mosques retrieved successfully.",
       data: mosques,
+    });
+  },
+);
+
+/**
+ * GET /api/mosques/:mosqueId
+ * Access: Authenticated + any role in that mosque
+ *
+ * Returns full mosque settings (name, address, timezone, fiscalYearStart).
+ * 404s (not 403) if the caller has no ACTIVE membership there — prevents tenant enumeration.
+ */
+export const getMosqueSettingsHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const userId = req.user!.sub;
+    const mosqueId = validateMosqueIdParam(req.params["mosqueId"]);
+
+    const mosqueSettings = await getMosqueSettings(userId, mosqueId);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Mosque settings retrieved successfully.",
+      data: mosqueSettings,
     });
   },
 );
