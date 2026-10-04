@@ -17,9 +17,10 @@
 
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
+import { prisma } from "../lib/prisma.js";
 import { HttpError } from "../errors/HttpError.js";
 import { verifyAccessToken, type AccessTokenPayload } from "../utils/token.js";
-import type { Role } from "../../generated/prisma/client.js";
+import { Role, UserStatus } from "../../generated/prisma/client.js";
 
 /**
  * Extracts the access token from any possible location in the incoming request:
@@ -177,4 +178,63 @@ export function authorizeRole(...allowedRoles: Role[]) {
 
     next();
   };
+}
+
+/**
+ * Strict Super Admin guard.
+ * Must be preceded by `authenticate`.
+ *
+ * Security guarantees:
+ * 1. Checks that the caller is authenticated.
+ * 2. Re-verifies live in the database that caller's account status is ACTIVE.
+ * 3. Re-verifies live in the database that caller's platform role is strictly SUPER_ADMIN.
+ * 4. Never trusts JWT token payload claims alone for platform-critical administrative actions.
+ */
+export async function requireSuperAdmin(
+  req: Request,
+  _res: Response,
+  next: NextFunction,
+): Promise<void> {
+  try {
+    if (!req.user?.sub) {
+      throw HttpError.unauthorized(
+        "Authentication required.",
+        "AUTH_UNAUTHORIZED",
+      );
+    }
+
+    const caller = await prisma.user.findUnique({
+      where: { id: req.user.sub },
+      select: {
+        id: true,
+        role: true,
+        status: true,
+      },
+    });
+
+    if (!caller) {
+      throw HttpError.unauthorized(
+        "Authenticated user account not found.",
+        "AUTH_USER_NOT_FOUND",
+      );
+    }
+
+    if (caller.status !== UserStatus.ACTIVE) {
+      throw HttpError.forbidden(
+        "Access denied. Your account is inactive or blocked.",
+        "ACCOUNT_INACTIVE",
+      );
+    }
+
+    if (caller.role !== Role.SUPER_ADMIN) {
+      throw HttpError.forbidden(
+        "Access denied. Only platform super administrators can perform this action.",
+        "FORBIDDEN_SUPER_ADMIN_REQUIRED",
+      );
+    }
+
+    next();
+  } catch (error) {
+    next(error);
+  }
 }

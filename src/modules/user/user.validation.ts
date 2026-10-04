@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { HttpError, type ValidationIssue } from "../../errors/HttpError.js";
+import { UserStatus } from "../../../generated/prisma/client.js";
 
 export interface UpdateProfileInput {
   name?: string;
@@ -153,4 +154,73 @@ export function validateUpdateProfileInput(body: unknown): UpdateProfileInput {
   }
 
   return input;
+}
+
+// ---------------------------------------------------------------------------
+// Update User Status (Super Admin only)
+// ---------------------------------------------------------------------------
+
+export interface UpdateUserStatusInput {
+  status: UserStatus;
+  reason?: string | null;
+}
+
+export function validateUpdateUserStatusInput(body: unknown): UpdateUserStatusInput {
+  if (!body || typeof body !== "object") {
+    throw HttpError.badRequest("Request body must be a JSON object.");
+  }
+
+  const raw = body as Record<string, unknown>;
+  const issues: ValidationIssue[] = [];
+
+  // -- status (required) ----------------------------------------------------
+  let status: UserStatus | undefined;
+  if (!raw["status"] || typeof raw["status"] !== "string") {
+    issues.push({
+      field: "status",
+      issue: "status is required and must be one of: ACTIVE, INACTIVE, BLOCKED.",
+    });
+  } else {
+    const uppercaseStatus = raw["status"].trim().toUpperCase();
+    if (!Object.values(UserStatus).includes(uppercaseStatus as UserStatus)) {
+      issues.push({
+        field: "status",
+        issue: `Invalid status '${raw["status"]}'. Allowed values are: ${Object.values(UserStatus).join(", ")}.`,
+      });
+    } else {
+      status = uppercaseStatus as UserStatus;
+    }
+  }
+
+  // -- reason (optional) ----------------------------------------------------
+  let reason: string | null | undefined;
+  if (raw["reason"] !== undefined) {
+    if (raw["reason"] === null || raw["reason"] === "") {
+      reason = null;
+    } else if (typeof raw["reason"] === "string") {
+      const trimmed = raw["reason"].trim();
+      if (trimmed.length > 255) {
+        issues.push({
+          field: "reason",
+          issue: "reason cannot exceed 255 characters.",
+        });
+      } else {
+        reason = trimmed;
+      }
+    } else {
+      issues.push({
+        field: "reason",
+        issue: "reason must be a string or null.",
+      });
+    }
+  }
+
+  if (issues.length > 0) {
+    throw HttpError.validationError(issues);
+  }
+
+  return {
+    status: status!,
+    ...(reason !== undefined ? { reason } : {}),
+  };
 }

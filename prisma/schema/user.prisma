@@ -23,6 +23,9 @@ model User {
   emailVerified Boolean    @default(false)
   status        UserStatus @default(ACTIVE)
 
+  // -- Platform role (SUPER_ADMIN; all tenant-scoped roles live on Membership)
+  role          Role?
+
   // -- Localisation ---------------------------------------------------------
   /// IETF locale tag, e.g. "bn", "en". Drives UI language & number formats.
   locale String @default("bn")

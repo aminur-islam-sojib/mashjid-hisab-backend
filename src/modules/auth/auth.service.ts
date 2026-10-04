@@ -61,6 +61,7 @@ export interface PublicUser {
   locale: string;
   emailVerified: boolean;
   status: UserStatus;
+  role: Role | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -266,6 +267,7 @@ export async function registerUser(
           locale: true,
           emailVerified: true,
           status: true,
+          role: true,
           sessionVersion: true,
         },
       });
@@ -328,6 +330,7 @@ export async function registerUser(
       locale: createdUser.locale,
       emailVerified: createdUser.emailVerified,
       status: createdUser.status,
+      role: createdUser.role ?? null,
     },
     memberships,
     accessToken,
@@ -364,6 +367,7 @@ export async function loginUser(
       locale: true,
       emailVerified: true,
       status: true,
+      role: true,
       passwordHash: true,
       sessionVersion: true,
     },
@@ -412,11 +416,12 @@ export async function loginUser(
   });
 
   // -------------------------------------------------------------------------
-  // 4. Resolve mosque context
-  //    • 1 ACTIVE  → embed mosqueId + role in both tokens
-  //    • 0 or >1   → null (client must create/join or call switch-mosque)
+  // 4. Resolve mosque context & effective role
+  //    • 1 ACTIVE membership → embed mosqueId + membership role
+  //    • 0 or >1             → null mosqueId + fallback to user.role (e.g. SUPER_ADMIN)
   // -------------------------------------------------------------------------
   const activeMembership = resolveActiveMembership(memberships);
+  const effectiveRole = activeMembership?.role ?? user.role ?? null;
 
   // -------------------------------------------------------------------------
   // 5. Issue token pair
@@ -436,7 +441,7 @@ export async function loginUser(
   const accessToken = signAccessToken({
     sub: user.id,
     mosqueId: activeMembership?.mosqueId ?? null,
-    role: activeMembership?.role ?? null,
+    role: effectiveRole,
     sessionVersion: user.sessionVersion,
   });
 
@@ -452,9 +457,10 @@ export async function loginUser(
       locale: user.locale,
       emailVerified: user.emailVerified,
       status: user.status,
+      role: user.role ?? null,
     },
     activeMosqueId: activeMembership?.mosqueId ?? null,
-    role: activeMembership?.role ?? null,
+    role: effectiveRole,
     accessToken,
     refreshToken: rawRefreshJwt,
   };
@@ -611,6 +617,7 @@ export async function getAuthenticatedUser(
       locale: true,
       emailVerified: true,
       status: true,
+      role: true,
       memberships: {
         where: { status: MembershipStatus.ACTIVE },
         select: {
@@ -655,9 +662,10 @@ export async function getAuthenticatedUser(
       locale: user.locale,
       emailVerified: user.emailVerified,
       status: user.status,
+      role: user.role ?? null,
     },
     activeMosqueId: active?.mosqueId ?? null,
-    role: active?.role ?? null,
+    role: active?.role ?? user.role ?? null,
     memberships: user.memberships,
   };
 }
