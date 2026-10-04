@@ -9,11 +9,13 @@ import {
   validateCreateMosqueInput,
   validateGetUserMosquesQuery,
   validateMosqueIdParam,
+  validateUpdateMosqueInput,
 } from "./mosque.validation.js";
 import {
   createMosque,
   getUserMosques,
   getMosqueSettings,
+  updateMosque,
 } from "./mosque.service.js";
 
 /**
@@ -81,6 +83,28 @@ export const getMosqueSettingsHandler = catchAsync(
       statusCode: 200,
       message: "Mosque settings retrieved successfully.",
       data: mosqueSettings,
+    });
+  },
+);
+
+/**
+ * PATCH /api/mosques/:mosqueId
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Updates name, address, timezone, and fiscalYearStart.
+ * Changing fiscalYearStart mid-year requires explicit confirmation ('confirmFiscalYearChange: true').
+ */
+export const updateMosqueHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const input = validateUpdateMosqueInput(req.body);
+
+    const updatedSettings = await updateMosque(mosqueId, input);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Mosque settings updated successfully.",
+      data: updatedSettings,
     });
   },
 );

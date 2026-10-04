@@ -4,10 +4,13 @@
 
 import { Router } from "express";
 import { authenticate } from "../../middlewares/auth.middleware.js";
+import { requireMosqueMembership } from "../../middlewares/mosque.middleware.js";
+import { Role } from "../../../generated/prisma/client.js";
 import {
   createMosqueHandler,
   getUserMosquesHandler,
   getMosqueSettingsHandler,
+  updateMosqueHandler,
 } from "./mosque.controller.js";
 
 const mosqueRouter: Router = Router();
@@ -27,7 +30,26 @@ mosqueRouter.get("/", authenticate, getUserMosquesHandler);
  * Full mosque settings (name, address, timezone, fiscalYearStart).
  * 404s (not 403) if the caller has no Membership there — don't reveal the mosque exists.
  */
-mosqueRouter.get("/:mosqueId", authenticate, getMosqueSettingsHandler);
+mosqueRouter.get(
+  "/:mosqueId",
+  authenticate,
+  requireMosqueMembership(),
+  getMosqueSettingsHandler,
+);
+
+/**
+ * PATCH /api/mosques/:mosqueId
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Updates name/address/timezone/fiscalYearStart.
+ * Changing fiscalYearStart mid-year requires explicit confirmation ('confirmFiscalYearChange: true').
+ */
+mosqueRouter.patch(
+  "/:mosqueId",
+  authenticate,
+  requireMosqueMembership(Role.MOSQUE_ADMIN),
+  updateMosqueHandler,
+);
 
 /**
  * POST /api/mosques

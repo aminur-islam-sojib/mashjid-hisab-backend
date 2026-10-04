@@ -13,7 +13,10 @@ import {
   type Membership,
   Prisma,
 } from "../../../generated/prisma/client.js";
-import type { CreateMosqueInput } from "./mosque.validation.js";
+import type {
+  CreateMosqueInput,
+  UpdateMosqueInput,
+} from "./mosque.validation.js";
 
 export interface CreateMosqueResult {
   mosque: Mosque;
@@ -372,5 +375,82 @@ export async function getMosqueSettings(
     role: membership.role,
     createdAt: membership.mosque.createdAt,
     updatedAt: membership.mosque.updatedAt,
+  };
+}
+
+/**
+ * Updates mosque tenant settings (name, address, timezone, fiscalYearStart).
+ *
+ * Business logic & fiscal integrity guarantee:
+ * Changing `fiscalYearStart` is a critical business decision because it realigns
+ * financial accounting periods, splits/merges budget cycles, and affects financial
+ * reporting boundaries. Therefore, changing `fiscalYearStart` to a new month requires
+ * explicit confirmation (`confirmFiscalYearChange: true`). Silently applying a
+ * change to `fiscalYearStart` is strictly blocked.
+ *
+ * @param mosqueId - Target mosque unique ID.
+ * @param input - Validated update fields and optional confirmation flag.
+ * @returns Updated mosque settings with MOSQUE_ADMIN role context.
+ */
+export async function updateMosque(
+  mosqueId: string,
+  input: UpdateMosqueInput,
+): Promise<MosqueSettings> {
+  // 1. Fetch current mosque record
+  const currentMosque = await prisma.mosque.findUnique({
+    where: { id: mosqueId },
+  });
+
+  if (!currentMosque) {
+    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
+  }
+
+  // 2. Fiscal year start change guard:
+  // If fiscalYearStart is being changed to a different month, require explicit confirmation.
+  if (
+    input.fiscalYearStart !== undefined &&
+    input.fiscalYearStart !== currentMosque.fiscalYearStart
+  ) {
+    if (!input.confirmFiscalYearChange) {
+      const monthNames = [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December",
+      ];
+      const oldMonth = monthNames[currentMosque.fiscalYearStart - 1];
+      const newMonth = monthNames[input.fiscalYearStart - 1];
+
+      throw HttpError.badRequest(
+        `Changing the fiscal year start month from ${oldMonth} (${currentMosque.fiscalYearStart}) to ${newMonth} (${input.fiscalYearStart}) alters accounting periods, budget cycles, and financial report boundaries. Set 'confirmFiscalYearChange: true' in your request body to confirm this update.`,
+        "FISCAL_YEAR_CHANGE_CONFIRMATION_REQUIRED",
+      );
+    }
+  }
+
+  // 3. Atomically update settings
+  const updatedMosque = await prisma.mosque.update({
+    where: { id: mosqueId },
+    data: {
+      ...(input.name !== undefined && { name: input.name }),
+      ...(input.address !== undefined && { address: input.address }),
+      ...(input.timezone !== undefined && { timezone: input.timezone }),
+      ...(input.fiscalYearStart !== undefined && {
+        fiscalYearStart: input.fiscalYearStart,
+      }),
+    },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      address: true,
+      timezone: true,
+      fiscalYearStart: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  return {
+    ...updatedMosque,
+    role: Role.MOSQUE_ADMIN,
   };
 }

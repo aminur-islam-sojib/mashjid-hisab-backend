@@ -78,13 +78,14 @@ export function requireMosqueMembership(...allowedRoles: Role[]) {
         );
       }
 
-      // 3. Query DB for live Membership (never trust stale JWT claims)
-      const membership = await prisma.membership.findUnique({
+      // 3. Query DB for live Membership (supports both CUID and slug, never trust stale JWT claims)
+      const membership = await prisma.membership.findFirst({
         where: {
-          userId_mosqueId: {
-            userId: req.user.sub,
-            mosqueId: mosqueId.trim(),
-          },
+          userId: req.user.sub,
+          OR: [
+            { mosqueId: mosqueId.trim() },
+            { mosque: { slug: mosqueId.trim() } },
+          ],
         },
         include: {
           user: {
@@ -93,11 +94,12 @@ export function requireMosqueMembership(...allowedRoles: Role[]) {
         },
       });
 
-      // 4. Must exist and membership must be ACTIVE
+      // 4. Must exist and membership must be ACTIVE.
+      // Returns 404 (not 403) to prevent leaking existence of private tenants.
       if (!membership || membership.status !== MembershipStatus.ACTIVE) {
-        throw HttpError.forbidden(
-          "Access denied. You do not hold an active membership in this mosque.",
-          "FORBIDDEN_MEMBERSHIP_INACTIVE",
+        throw HttpError.notFound(
+          "Mosque not found.",
+          "MOSQUE_NOT_FOUND",
         );
       }
 
@@ -117,9 +119,9 @@ export function requireMosqueMembership(...allowedRoles: Role[]) {
         );
       }
 
-      // 6. Attach to request context
+      // 6. Attach canonical membership and primary mosque ID to request context
       req.membership = membership;
-      req.mosqueId = mosqueId.trim();
+      req.mosqueId = membership.mosqueId;
 
       next();
     } catch (error) {
