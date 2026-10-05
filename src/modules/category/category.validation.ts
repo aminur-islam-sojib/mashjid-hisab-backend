@@ -110,6 +110,12 @@ export interface GetMosqueCategoriesQuery {
 
 /**
  * Validates query parameters for GET /api/mosques/:mosqueId/categories
+ *
+ * Rules:
+ * - includeArchived: optional boolean (true/false)
+ * - type: optional CategoryType (INCOME | EXPENSE)
+ * - fundId: optional string (specific fund CUID or 'null'/'none'/'unrestricted')
+ * - search: optional string (max 100 chars)
  */
 export function validateGetMosqueCategoriesQuery(query: unknown): GetMosqueCategoriesQuery {
   if (!query || typeof query !== "object") return {};
@@ -188,4 +194,3 @@ export function validateGetMosqueCategoriesQuery(query: unknown): GetMosqueCateg
 
   return result;
 }
-
