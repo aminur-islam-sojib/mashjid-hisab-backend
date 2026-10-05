@@ -10,6 +10,13 @@ import { notFound } from "./middlewares/notFound.js";
 const app: Application = express();
 
 // ---------------------------------------------------------------------------
+// BigInt JSON serialization patch — converts minor unit poisha to string
+// ---------------------------------------------------------------------------
+(BigInt.prototype as unknown as { toJSON: () => string }).toJSON = function () {
+  return this.toString();
+};
+
+// ---------------------------------------------------------------------------
 // Core middleware
 // ---------------------------------------------------------------------------
 app.use(express.json());

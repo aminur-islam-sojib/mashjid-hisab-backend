@@ -8,6 +8,7 @@ import { requireMosqueMembership } from "../../middlewares/mosque.middleware.js"
 import { Role } from "../../../generated/prisma/client.js";
 import membershipRouter from "../membership/membership.routes.js";
 import fundRouter from "../fund/fund.routes.js";
+import accountRouter from "../account/account.routes.js";
 import {
   createMosqueHandler,
   getUserMosquesHandler,
@@ -39,6 +40,12 @@ mosqueRouter.use("/:mosqueId/members", membershipRouter);
  * Delegated to Fund Router (fund listing, fund creation, etc.)
  */
 mosqueRouter.use("/:mosqueId/funds", fundRouter);
+
+/**
+ * /api/mosques/:mosqueId/accounts
+ * Delegated to Account Router (account creation, details, etc.)
+ */
+mosqueRouter.use("/:mosqueId/accounts", accountRouter);
 
 /**
  * GET /api/mosques/:mosqueId
