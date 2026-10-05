@@ -10,7 +10,10 @@ import {
   Prisma,
 } from "../../../generated/prisma/client.js";
 import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
-import type { CreateCategoryInput } from "./category.validation.js";
+import type {
+  CreateCategoryInput,
+  GetMosqueCategoriesQuery,
+} from "./category.validation.js";
 
 export interface CategoryFundSummary {
   id: string;
@@ -224,3 +227,93 @@ export async function getCategoryById(
     fund: category.fund ?? null,
   };
 }
+
+/**
+ * Lists Categories for a mosque.
+ *
+ * Access: MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER, STAFF.
+ * Staff members are included because they need to select categories when
+ * submitting or recording operational expenses (e.g. cleaning supplies, utility bills).
+ * Default: Returns active (non-archived) categories.
+ * If query.includeArchived is true: Returns all categories including archived.
+ * Filterable by:
+ * - ?type= (INCOME | EXPENSE)
+ * - ?fundId= (specific fund CUID or 'null'/'unrestricted' for general categories)
+ * - ?search= (case-insensitive name search)
+ *
+ * @param mosqueId - Identifier (CUID or slug) of the target mosque
+ * @param query - Optional query filters (includeArchived, type, fundId, search)
+ */
+export async function getMosqueCategories(
+  mosqueId: string,
+  query?: GetMosqueCategoriesQuery,
+): Promise<CategoryResponseItem[]> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  const where: Prisma.CategoryWhereInput = {
+    mosqueId: resolvedMosqueId,
+  };
+
+  // Filter archived status (default: active only)
+  if (!query?.includeArchived) {
+    where.isArchived = false;
+  }
+
+  // Optional type filter (INCOME / EXPENSE)
+  if (query?.type) {
+    where.type = query.type;
+  }
+
+  // Optional fundId filter
+  if (query?.fundId !== undefined) {
+    where.fundId = query.fundId;
+  }
+
+  // Optional search query on category name
+  if (query?.search) {
+    where.name = {
+      contains: query.search,
+      mode: "insensitive",
+    };
+  }
+
+  const categories = await prisma.category.findMany({
+    where,
+    orderBy: [
+      { isArchived: "asc" },
+      { type: "asc" },
+      { name: "asc" },
+    ],
+    select: {
+      id: true,
+      mosqueId: true,
+      fundId: true,
+      name: true,
+      type: true,
+      isArchived: true,
+      createdAt: true,
+      updatedAt: true,
+      fund: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          isRestricted: true,
+        },
+      },
+    },
+  });
+
+  return categories.map((c) => ({
+    id: c.id,
+    mosqueId: c.mosqueId,
+    fundId: c.fundId,
+    name: c.name,
+    type: c.type,
+    isArchived: c.isArchived,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+    fund: c.fund ?? null,
+  }));
+}
+

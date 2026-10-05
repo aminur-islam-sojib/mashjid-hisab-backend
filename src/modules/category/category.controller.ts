@@ -9,10 +9,12 @@ import { validateMosqueIdParam } from "../mosque/mosque.validation.js";
 import {
   validateCreateCategoryInput,
   validateCategoryIdParam,
+  validateGetMosqueCategoriesQuery,
 } from "./category.validation.js";
 import {
   createCategory,
   getCategoryById,
+  getMosqueCategories,
 } from "./category.service.js";
 
 /**
@@ -57,3 +59,26 @@ export const getCategoryByIdHandler = catchAsync(
     });
   },
 );
+
+/**
+ * GET /api/mosques/:mosqueId/categories
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER, STAFF
+ *
+ * Lists Categories for a mosque, filterable by ?type= and ?fundId=. Pass ?includeArchived=true for settings.
+ * STAFF is included so they can select categories when submitting or recording operational expenses.
+ */
+export const getMosqueCategoriesHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const query = validateGetMosqueCategoriesQuery(req.query);
+
+    const categories = await getMosqueCategories(mosqueId, query);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Categories retrieved successfully.",
+      data: categories,
+    });
+  },
+);
+

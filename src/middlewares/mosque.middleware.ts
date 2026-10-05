@@ -52,6 +52,17 @@ export const ADMIN_ONLY_ROLES: readonly Role[] = [
 ] as const;
 
 /**
+ * Roles permitted to view operational records such as categories for expense entry.
+ * MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER, STAFF
+ */
+export const OPERATIONAL_ROLES: readonly Role[] = [
+  Role.MOSQUE_ADMIN,
+  Role.TREASURER,
+  Role.COMMITTEE_MEMBER,
+  Role.STAFF,
+] as const;
+
+/**
  * Middleware factory requiring the caller to hold an ACTIVE Membership in the
  * mosque identified by the `:mosqueId` route parameter.
  *

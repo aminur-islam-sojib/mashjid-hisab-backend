@@ -100,3 +100,92 @@ export function validateCreateCategoryInput(body: unknown): CreateCategoryInput 
     fundId,
   };
 }
+
+export interface GetMosqueCategoriesQuery {
+  includeArchived?: boolean;
+  type?: CategoryType;
+  fundId?: string | null;
+  search?: string;
+}
+
+/**
+ * Validates query parameters for GET /api/mosques/:mosqueId/categories
+ */
+export function validateGetMosqueCategoriesQuery(query: unknown): GetMosqueCategoriesQuery {
+  if (!query || typeof query !== "object") return {};
+  const raw = query as Record<string, unknown>;
+  const result: GetMosqueCategoriesQuery = {};
+
+  // -- includeArchived (optional) --------------------------------------------
+  if (
+    raw["includeArchived"] !== undefined &&
+    raw["includeArchived"] !== null &&
+    raw["includeArchived"] !== ""
+  ) {
+    if (
+      raw["includeArchived"] === true ||
+      raw["includeArchived"] === "true" ||
+      raw["includeArchived"] === "1"
+    ) {
+      result.includeArchived = true;
+    } else if (
+      raw["includeArchived"] === false ||
+      raw["includeArchived"] === "false" ||
+      raw["includeArchived"] === "0"
+    ) {
+      result.includeArchived = false;
+    } else {
+      throw HttpError.badRequest(
+        "Query parameter 'includeArchived' must be a boolean (true/false).",
+        "INVALID_QUERY_PARAM",
+      );
+    }
+  }
+
+  // -- type (optional) -------------------------------------------------------
+  if (raw["type"] !== undefined && raw["type"] !== null && raw["type"] !== "") {
+    if (typeof raw["type"] !== "string") {
+      throw HttpError.badRequest("Category type filter must be a string.");
+    }
+    const typeUpper = raw["type"].trim().toUpperCase();
+    if (!Object.values(CategoryType).includes(typeUpper as CategoryType)) {
+      throw HttpError.badRequest(
+        `Invalid category type filter '${raw["type"]}'. Allowed types: ${Object.values(CategoryType).join(", ")}.`,
+        "INVALID_CATEGORY_TYPE",
+      );
+    }
+    result.type = typeUpper as CategoryType;
+  }
+
+  // -- fundId (optional) -----------------------------------------------------
+  if (raw["fundId"] !== undefined && raw["fundId"] !== null && raw["fundId"] !== "") {
+    if (typeof raw["fundId"] !== "string") {
+      throw HttpError.badRequest("fundId filter must be a string.");
+    }
+    const trimmed = raw["fundId"].trim();
+    if (
+      trimmed.toLowerCase() === "null" ||
+      trimmed.toLowerCase() === "none" ||
+      trimmed.toLowerCase() === "unrestricted"
+    ) {
+      result.fundId = null;
+    } else {
+      result.fundId = trimmed;
+    }
+  }
+
+  // -- search (optional) -----------------------------------------------------
+  if (raw["search"] !== undefined && raw["search"] !== null && raw["search"] !== "") {
+    if (typeof raw["search"] !== "string") {
+      throw HttpError.badRequest("Search query must be a string.");
+    }
+    const trimmed = raw["search"].trim();
+    if (trimmed.length > 100) {
+      throw HttpError.badRequest("Search query cannot exceed 100 characters.");
+    }
+    result.search = trimmed;
+  }
+
+  return result;
+}
+

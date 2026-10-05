@@ -7,11 +7,12 @@ import { authenticate } from "../../middlewares/auth.middleware.js";
 import {
   requireMosqueMembership,
   FINANCIAL_OPERATOR_ROLES,
-  OVERSIGHT_ROLES,
+  OPERATIONAL_ROLES,
 } from "../../middlewares/mosque.middleware.js";
 import {
   createCategoryHandler,
   getCategoryByIdHandler,
+  getMosqueCategoriesHandler,
 } from "./category.controller.js";
 
 const categoryRouter: Router = Router({ mergeParams: true });
@@ -31,15 +32,29 @@ categoryRouter.post(
 );
 
 /**
+ * GET /api/mosques/:mosqueId/categories
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER, STAFF
+ *
+ * Lists Categories for a mosque, filterable by ?type= and ?fundId=.
+ * STAFF is included so they can select categories when submitting or recording operational expenses.
+ */
+categoryRouter.get(
+  "/",
+  authenticate,
+  requireMosqueMembership(...OPERATIONAL_ROLES),
+  getMosqueCategoriesHandler,
+);
+
+/**
  * GET /api/mosques/:mosqueId/categories/:categoryId
- * Access: Authenticated + MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER, STAFF
  *
  * Retrieves a single Category by its ID.
  */
 categoryRouter.get(
   "/:categoryId",
   authenticate,
-  requireMosqueMembership(...OVERSIGHT_ROLES),
+  requireMosqueMembership(...OPERATIONAL_ROLES),
   getCategoryByIdHandler,
 );
 
