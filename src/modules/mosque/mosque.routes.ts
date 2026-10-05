@@ -10,6 +10,7 @@ import membershipRouter from "../membership/membership.routes.js";
 import fundRouter from "../fund/fund.routes.js";
 import accountRouter from "../account/account.routes.js";
 import categoryRouter from "../category/category.routes.js";
+import familyRouter from "../family/family.routes.js";
 import {
   createMosqueHandler,
   getUserMosquesHandler,
@@ -53,6 +54,12 @@ mosqueRouter.use("/:mosqueId/accounts", accountRouter);
  * Delegated to Category Router (category creation, details, etc.)
  */
 mosqueRouter.use("/:mosqueId/categories", categoryRouter);
+
+/**
+ * /api/mosques/:mosqueId/families
+ * Delegated to Family Router (household creation, members, headship transfer, etc.)
+ */
+mosqueRouter.use("/:mosqueId/families", familyRouter);
 
 /**
  * GET /api/mosques/:mosqueId
