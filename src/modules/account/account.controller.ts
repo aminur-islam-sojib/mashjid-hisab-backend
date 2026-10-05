@@ -9,10 +9,12 @@ import { validateMosqueIdParam } from "../mosque/mosque.validation.js";
 import {
   validateCreateAccountInput,
   validateAccountIdParam,
+  validateGetMosqueAccountsQuery,
 } from "./account.validation.js";
 import {
   createAccount,
   getAccountById,
+  getMosqueAccounts,
 } from "./account.service.js";
 
 /**
@@ -32,6 +34,28 @@ export const createAccountHandler = catchAsync(
       statusCode: 201,
       message: "Account created successfully.",
       data: account,
+    });
+  },
+);
+
+/**
+ * GET /api/mosques/:mosqueId/accounts
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER
+ *
+ * Lists active Accounts. Pass ?includeArchived=true for the settings screen.
+ * Sensitive information (accountNumber) is included.
+ */
+export const getMosqueAccountsHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const query = validateGetMosqueAccountsQuery(req.query);
+
+    const accounts = await getMosqueAccounts(mosqueId, query);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Accounts retrieved successfully.",
+      data: accounts,
     });
   },
 );

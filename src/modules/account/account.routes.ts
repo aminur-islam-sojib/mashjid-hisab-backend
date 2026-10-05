@@ -12,6 +12,7 @@ import {
 import {
   createAccountHandler,
   getAccountByIdHandler,
+  getMosqueAccountsHandler,
 } from "./account.controller.js";
 
 const accountRouter: Router = Router({ mergeParams: true });
@@ -28,6 +29,20 @@ accountRouter.post(
   authenticate,
   requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
   createAccountHandler,
+);
+
+/**
+ * GET /api/mosques/:mosqueId/accounts
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER
+ *
+ * Lists active Accounts. Pass ?includeArchived=true for the settings screen.
+ * Sensitive information (accountNumber) is included here.
+ */
+accountRouter.get(
+  "/",
+  authenticate,
+  requireMosqueMembership(...OVERSIGHT_ROLES),
+  getMosqueAccountsHandler,
 );
 
 /**

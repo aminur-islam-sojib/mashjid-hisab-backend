@@ -10,7 +10,10 @@ import {
   type PrismaClient,
 } from "../../../generated/prisma/client.js";
 import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
-import type { CreateAccountInput } from "./account.validation.js";
+import type {
+  CreateAccountInput,
+  GetMosqueAccountsQuery,
+} from "./account.validation.js";
 
 export interface AccountResponseItem {
   id: string;
@@ -181,3 +184,86 @@ export async function getAccountById(
     updatedAt: account.updatedAt,
   };
 }
+
+/**
+ * Lists Accounts for a mosque.
+ *
+ * Access: MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER (OVERSIGHT_ROLES).
+ * Sensitive information (accountNumber) is included here, which is why access
+ * is restricted to governance and financial oversight bodies rather than general members.
+ * Default: Returns active (non-archived) accounts.
+ * If query.includeArchived is true: Returns all accounts including archived.
+ *
+ * @param mosqueId - Identifier (CUID or slug) of the target mosque
+ * @param query - Optional query filters (includeArchived, type, search)
+ */
+export async function getMosqueAccounts(
+  mosqueId: string,
+  query?: GetMosqueAccountsQuery,
+): Promise<AccountResponseItem[]> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  const where: Prisma.AccountWhereInput = {
+    mosqueId: resolvedMosqueId,
+  };
+
+  // Filter archived status
+  if (!query?.includeArchived) {
+    where.isArchived = false;
+  }
+
+  // Optional type filter
+  if (query?.type) {
+    where.type = query.type;
+  }
+
+  // Optional search query on account name or account number
+  if (query?.search) {
+    where.OR = [
+      {
+        name: {
+          contains: query.search,
+          mode: "insensitive",
+        },
+      },
+      {
+        accountNumber: {
+          contains: query.search,
+          mode: "insensitive",
+        },
+      },
+    ];
+  }
+
+  const accounts = await prisma.account.findMany({
+    where,
+    orderBy: [
+      { isArchived: "asc" },
+      { name: "asc" },
+    ],
+    select: {
+      id: true,
+      mosqueId: true,
+      name: true,
+      type: true,
+      accountNumber: true,
+      openingBalance: true,
+      isArchived: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  return accounts.map((a) => ({
+    id: a.id,
+    mosqueId: a.mosqueId,
+    name: a.name,
+    type: a.type,
+    accountNumber: a.accountNumber,
+    openingBalance: a.openingBalance.toString(),
+    isArchived: a.isArchived,
+    createdAt: a.createdAt,
+    updatedAt: a.updatedAt,
+  }));
+}
+

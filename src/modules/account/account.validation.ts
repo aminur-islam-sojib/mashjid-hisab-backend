@@ -167,3 +167,73 @@ export function validateCreateAccountInput(body: unknown): CreateAccountInput {
     openingBalance,
   };
 }
+
+export interface GetMosqueAccountsQuery {
+  includeArchived?: boolean;
+  type?: AccountType;
+  search?: string;
+}
+
+/**
+ * Validates query parameters for GET /api/mosques/:mosqueId/accounts
+ */
+export function validateGetMosqueAccountsQuery(query: unknown): GetMosqueAccountsQuery {
+  if (!query || typeof query !== "object") return {};
+  const raw = query as Record<string, unknown>;
+  const result: GetMosqueAccountsQuery = {};
+
+  // -- includeArchived (optional) --------------------------------------------
+  if (
+    raw["includeArchived"] !== undefined &&
+    raw["includeArchived"] !== null &&
+    raw["includeArchived"] !== ""
+  ) {
+    if (
+      raw["includeArchived"] === true ||
+      raw["includeArchived"] === "true" ||
+      raw["includeArchived"] === "1"
+    ) {
+      result.includeArchived = true;
+    } else if (
+      raw["includeArchived"] === false ||
+      raw["includeArchived"] === "false" ||
+      raw["includeArchived"] === "0"
+    ) {
+      result.includeArchived = false;
+    } else {
+      throw HttpError.badRequest(
+        "Query parameter 'includeArchived' must be a boolean (true/false).",
+        "INVALID_QUERY_PARAM",
+      );
+    }
+  }
+
+  // -- type (optional) -------------------------------------------------------
+  if (raw["type"] !== undefined && raw["type"] !== null && raw["type"] !== "") {
+    if (typeof raw["type"] !== "string") {
+      throw HttpError.badRequest("Account type filter must be a string.");
+    }
+    const typeUpper = raw["type"].trim().toUpperCase();
+    if (!Object.values(AccountType).includes(typeUpper as AccountType)) {
+      throw HttpError.badRequest(
+        `Invalid account type filter '${raw["type"]}'. Allowed types: ${Object.values(AccountType).join(", ")}.`,
+        "INVALID_ACCOUNT_TYPE",
+      );
+    }
+    result.type = typeUpper as AccountType;
+  }
+
+  // -- search (optional) -----------------------------------------------------
+  if (raw["search"] !== undefined && raw["search"] !== null && raw["search"] !== "") {
+    if (typeof raw["search"] !== "string") {
+      throw HttpError.badRequest("Search query must be a string.");
+    }
+    const trimmed = raw["search"].trim();
+    if (trimmed.length > 100) {
+      throw HttpError.badRequest("Search query cannot exceed 100 characters.");
+    }
+    result.search = trimmed;
+  }
+
+  return result;
+}
