@@ -478,4 +478,82 @@ export async function updateCategory(
   }
 }
 
+/**
+ * Soft-deletes a category by setting isArchived: true.
+ * Hides it from new-transaction dropdowns while preserving historical transaction records.
+ *
+ * Business & Security Rules:
+ * 1. Multi-Tenant Boundary: Category must belong strictly to resolvedMosqueId.
+ *    Returns 404 if not found or belongs to another tenant.
+ * 2. Already Archived Guard: Blocks with 400 CATEGORY_ALREADY_ARCHIVED if category is already archived.
+ * 3. Historical Integrity: Preserves foreign key references so historical income/expense
+ *    ledgers retain category classification without data loss.
+ *
+ * @param mosqueId - Identifier (CUID or slug) of the target mosque
+ * @param categoryId - CUID of the category to archive
+ */
+export async function archiveCategory(
+  mosqueId: string,
+  categoryId: string,
+): Promise<CategoryResponseItem> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  // 1. Fetch current category within tenant boundary
+  const currentCategory = await prisma.category.findFirst({
+    where: {
+      id: categoryId,
+      mosqueId: resolvedMosqueId,
+    },
+  });
+
+  if (!currentCategory) {
+    throw HttpError.notFound("Category not found.", "CATEGORY_NOT_FOUND");
+  }
+
+  // 2. Reject if already archived
+  if (currentCategory.isArchived) {
+    throw HttpError.badRequest(
+      "Operation rejected: Category is already archived.",
+      "CATEGORY_ALREADY_ARCHIVED",
+    );
+  }
+
+  // 3. Soft-delete category
+  const archived = await prisma.category.update({
+    where: { id: currentCategory.id },
+    data: { isArchived: true },
+    select: {
+      id: true,
+      mosqueId: true,
+      fundId: true,
+      name: true,
+      type: true,
+      isArchived: true,
+      createdAt: true,
+      updatedAt: true,
+      fund: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          isRestricted: true,
+        },
+      },
+    },
+  });
+
+  return {
+    id: archived.id,
+    mosqueId: archived.mosqueId,
+    fundId: archived.fundId,
+    name: archived.name,
+    type: archived.type,
+    isArchived: archived.isArchived,
+    createdAt: archived.createdAt,
+    updatedAt: archived.updatedAt,
+    fund: archived.fund ?? null,
+  };
+}
+
+
 

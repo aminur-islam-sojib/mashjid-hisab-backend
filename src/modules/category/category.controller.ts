@@ -17,6 +17,7 @@ import {
   getCategoryById,
   getMosqueCategories,
   updateCategory,
+  archiveCategory,
 } from "./category.service.js";
 
 /**
@@ -106,5 +107,28 @@ export const updateCategoryHandler = catchAsync(
     });
   },
 );
+
+/**
+ * POST /api/mosques/:mosqueId/categories/:categoryId/archive
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Soft-deletes a category (sets isArchived: true).
+ * Hides it from new-transaction dropdowns while preserving historical transaction records.
+ */
+export const archiveCategoryHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const categoryId = validateCategoryIdParam(req.params["categoryId"]);
+
+    const category = await archiveCategory(mosqueId, categoryId);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Category archived successfully.",
+      data: category,
+    });
+  },
+);
+
 
 

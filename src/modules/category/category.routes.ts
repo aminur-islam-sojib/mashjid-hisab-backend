@@ -9,11 +9,13 @@ import {
   FINANCIAL_OPERATOR_ROLES,
   OPERATIONAL_ROLES,
 } from "../../middlewares/mosque.middleware.js";
+import { Role } from "../../../generated/prisma/client.js";
 import {
   createCategoryHandler,
   getCategoryByIdHandler,
   getMosqueCategoriesHandler,
   updateCategoryHandler,
+  archiveCategoryHandler,
 } from "./category.controller.js";
 
 const categoryRouter: Router = Router({ mergeParams: true });
@@ -71,6 +73,20 @@ categoryRouter.patch(
   authenticate,
   requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
   updateCategoryHandler,
+);
+
+/**
+ * POST /api/mosques/:mosqueId/categories/:categoryId/archive
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Archives a Category (sets isArchived: true).
+ * Hides it from new-transaction dropdowns while keeping it on old records.
+ */
+categoryRouter.post(
+  "/:categoryId/archive",
+  authenticate,
+  requireMosqueMembership(Role.MOSQUE_ADMIN),
+  archiveCategoryHandler,
 );
 
 export default categoryRouter;
