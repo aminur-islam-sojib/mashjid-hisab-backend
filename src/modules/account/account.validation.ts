@@ -237,3 +237,162 @@ export function validateGetMosqueAccountsQuery(query: unknown): GetMosqueAccount
 
   return result;
 }
+
+export interface UpdateAccountInput {
+  name?: string;
+  type?: AccountType;
+  accountNumber?: string | null;
+  openingBalance?: bigint;
+}
+
+/**
+ * Validates request payload for PATCH /api/mosques/:mosqueId/accounts/:accountId
+ *
+ * Rules:
+ * - At least one field must be provided (name, type, accountNumber, openingBalance).
+ * - name: optional string, 2-100 chars after trimming.
+ * - type: optional AccountType.
+ * - accountNumber: optional string (max 50 chars) or null/empty to clear.
+ * - openingBalance: optional non-negative integer minor units (poisha).
+ *   Cannot be modified once the account has any transactions.
+ */
+export function validateUpdateAccountInput(body: unknown): UpdateAccountInput {
+  if (!body || typeof body !== "object") {
+    throw HttpError.badRequest("Request body must be a JSON object.");
+  }
+
+  const raw = body as Record<string, unknown>;
+  const issues: ValidationIssue[] = [];
+  const input: UpdateAccountInput = {};
+  let hasUpdateFields = false;
+
+  // -- name (optional) -------------------------------------------------------
+  if (raw["name"] !== undefined) {
+    hasUpdateFields = true;
+    if (typeof raw["name"] !== "string" || !raw["name"].trim()) {
+      issues.push({ field: "name", issue: "Account name cannot be empty." });
+    } else {
+      const trimmedName = raw["name"].trim();
+      if (trimmedName.length < 2) {
+        issues.push({
+          field: "name",
+          issue: "Account name must be at least 2 characters long.",
+        });
+      } else if (trimmedName.length > 100) {
+        issues.push({
+          field: "name",
+          issue: "Account name cannot exceed 100 characters.",
+        });
+      } else {
+        input.name = trimmedName;
+      }
+    }
+  }
+
+  // -- type (optional) -------------------------------------------------------
+  if (raw["type"] !== undefined && raw["type"] !== null && raw["type"] !== "") {
+    hasUpdateFields = true;
+    if (typeof raw["type"] !== "string") {
+      issues.push({ field: "type", issue: "Account type must be a string." });
+    } else {
+      const typeUpper = raw["type"].trim().toUpperCase();
+      if (!Object.values(AccountType).includes(typeUpper as AccountType)) {
+        issues.push({
+          field: "type",
+          issue: `Invalid account type '${raw["type"]}'. Allowed types: ${Object.values(AccountType).join(", ")}.`,
+        });
+      } else {
+        input.type = typeUpper as AccountType;
+      }
+    }
+  }
+
+  // -- accountNumber (optional) ----------------------------------------------
+  if (raw["accountNumber"] !== undefined) {
+    hasUpdateFields = true;
+    if (raw["accountNumber"] === null || raw["accountNumber"] === "") {
+      input.accountNumber = null;
+    } else if (typeof raw["accountNumber"] !== "string") {
+      issues.push({
+        field: "accountNumber",
+        issue: "Account number must be a string or null.",
+      });
+    } else {
+      const trimmedAcc = raw["accountNumber"].trim();
+      if (trimmedAcc.length > 50) {
+        issues.push({
+          field: "accountNumber",
+          issue: "Account number cannot exceed 50 characters.",
+        });
+      } else {
+        input.accountNumber = trimmedAcc || null;
+      }
+    }
+  }
+
+  // -- openingBalance (optional) ---------------------------------------------
+  if (raw["openingBalance"] !== undefined && raw["openingBalance"] !== null && raw["openingBalance"] !== "") {
+    hasUpdateFields = true;
+    const rawBal = raw["openingBalance"];
+    if (typeof rawBal === "bigint") {
+      if (rawBal < 0n) {
+        issues.push({
+          field: "openingBalance",
+          issue: "Opening balance cannot be negative.",
+        });
+      } else {
+        input.openingBalance = rawBal;
+      }
+    } else if (typeof rawBal === "number") {
+      if (!Number.isFinite(rawBal) || !Number.isInteger(rawBal)) {
+        issues.push({
+          field: "openingBalance",
+          issue: "Opening balance must be an integer in minor units (poisha).",
+        });
+      } else if (rawBal < 0) {
+        issues.push({
+          field: "openingBalance",
+          issue: "Opening balance cannot be negative.",
+        });
+      } else {
+        input.openingBalance = BigInt(rawBal);
+      }
+    } else if (typeof rawBal === "string") {
+      const trimmed = rawBal.trim();
+      if (!/^\d+$/.test(trimmed)) {
+        issues.push({
+          field: "openingBalance",
+          issue: "Opening balance must be a non-negative integer in minor units (poisha).",
+        });
+      } else {
+        try {
+          input.openingBalance = BigInt(trimmed);
+        } catch {
+          issues.push({
+            field: "openingBalance",
+            issue: "Opening balance is an invalid numerical value.",
+          });
+        }
+      }
+    } else {
+      issues.push({
+        field: "openingBalance",
+        issue: "Opening balance must be an integer number or string in minor units (poisha).",
+      });
+    }
+  }
+
+  if (issues.length > 0) {
+    throw HttpError.validationError(issues);
+  }
+
+  if (!hasUpdateFields) {
+    throw HttpError.badRequest(
+      "At least one field must be provided to update (name, type, accountNumber, or openingBalance).",
+      "EMPTY_UPDATE_PAYLOAD",
+    );
+  }
+
+  return input;
+}
+

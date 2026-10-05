@@ -10,11 +10,13 @@ import {
   validateCreateAccountInput,
   validateAccountIdParam,
   validateGetMosqueAccountsQuery,
+  validateUpdateAccountInput,
 } from "./account.validation.js";
 import {
   createAccount,
   getAccountById,
   getMosqueAccounts,
+  updateAccount,
 } from "./account.service.js";
 
 /**
@@ -80,3 +82,27 @@ export const getAccountByIdHandler = catchAsync(
     });
   },
 );
+
+/**
+ * PATCH /api/mosques/:mosqueId/accounts/:accountId
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER
+ *
+ * Updates name/type/accountNumber.
+ * Never updates openingBalance after the account has any transactions.
+ */
+export const updateAccountHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const accountId = validateAccountIdParam(req.params["accountId"]);
+    const input = validateUpdateAccountInput(req.body);
+
+    const account = await updateAccount(mosqueId, accountId, input);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Account updated successfully.",
+      data: account,
+    });
+  },
+);
+

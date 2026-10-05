@@ -13,6 +13,7 @@ import {
   createAccountHandler,
   getAccountByIdHandler,
   getMosqueAccountsHandler,
+  updateAccountHandler,
 } from "./account.controller.js";
 
 const accountRouter: Router = Router({ mergeParams: true });
@@ -58,5 +59,20 @@ accountRouter.get(
   getAccountByIdHandler,
 );
 
+/**
+ * PATCH /api/mosques/:mosqueId/accounts/:accountId
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER
+ *
+ * Updates name/type/accountNumber.
+ * Never updates openingBalance after the account has any transactions.
+ */
+accountRouter.patch(
+  "/:accountId",
+  authenticate,
+  requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
+  updateAccountHandler,
+);
+
 export default accountRouter;
+
 
