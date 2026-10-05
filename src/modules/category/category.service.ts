@@ -13,6 +13,7 @@ import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
 import type {
   CreateCategoryInput,
   GetMosqueCategoriesQuery,
+  UpdateCategoryInput,
 } from "./category.validation.js";
 
 export interface CategoryFundSummary {
@@ -316,4 +317,165 @@ export async function getMosqueCategories(
     fund: c.fund ?? null,
   }));
 }
+
+/**
+ * Updates a financial Category for a mosque (name, fundId).
+ *
+ * Business & Security Rules:
+ * 1. Multi-Tenant Scoping: Category must belong strictly to resolvedMosqueId (404 if not found).
+ * 2. Inactive/Archived Guard: Cannot update an archived category (400 CATEGORY_ARCHIVED).
+ * 3. Unique Name Enforcement: Renaming checks against both active and archived categories
+ *    with the same type in the same mosque (case-insensitive) to prevent collision with @@unique([mosqueId, name, type]).
+ * 4. Fund Association & Non-Rewriting Invariant:
+ *    Changing fundId on a category already used by past transactions does NOT rewrite history;
+ *    it only affects future entries. Target fund must exist, belong to this mosque, and not be archived.
+ *    Setting fundId: null clears the restriction and allows the category to be used across any fund.
+ *
+ * @param mosqueId - Identifier (CUID or slug) of the target mosque
+ * @param categoryId - CUID of the category to update
+ * @param input - Validated update fields (name, fundId)
+ */
+export async function updateCategory(
+  mosqueId: string,
+  categoryId: string,
+  input: UpdateCategoryInput,
+): Promise<CategoryResponseItem> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  // 1. Fetch current category within tenant boundary
+  const currentCategory = await prisma.category.findFirst({
+    where: {
+      id: categoryId,
+      mosqueId: resolvedMosqueId,
+    },
+  });
+
+  if (!currentCategory) {
+    throw HttpError.notFound("Category not found.", "CATEGORY_NOT_FOUND");
+  }
+
+  // 2. Reject modifications to archived categories
+  if (currentCategory.isArchived) {
+    throw HttpError.badRequest(
+      "Cannot update an archived category. Please restore it first.",
+      "CATEGORY_ARCHIVED",
+    );
+  }
+
+  // 3. Name uniqueness verification if name is changing
+  if (input.name !== undefined && input.name.trim().toLowerCase() !== currentCategory.name.toLowerCase()) {
+    const existingWithSameName = await prisma.category.findFirst({
+      where: {
+        mosqueId: resolvedMosqueId,
+        type: currentCategory.type,
+        id: { not: currentCategory.id },
+        name: {
+          equals: input.name.trim(),
+          mode: "insensitive",
+        },
+      },
+      select: {
+        id: true,
+        isArchived: true,
+      },
+    });
+
+    if (existingWithSameName) {
+      if (existingWithSameName.isArchived) {
+        throw HttpError.conflict(
+          `A ${currentCategory.type.toLowerCase()} category named '${input.name.trim()}' already exists in this mosque but is archived. Please restore it or choose a different name.`,
+          "CATEGORY_NAME_ARCHIVED_EXISTS",
+        );
+      }
+      throw HttpError.conflict(
+        `A ${currentCategory.type.toLowerCase()} category named '${input.name.trim()}' already exists in this mosque.`,
+        "CATEGORY_NAME_EXISTS",
+      );
+    }
+  }
+
+  // 4. Validate new fundId if changing and non-null
+  if (input.fundId !== undefined && input.fundId !== null && input.fundId !== currentCategory.fundId) {
+    const fund = await prisma.fund.findFirst({
+      where: {
+        id: input.fundId,
+        mosqueId: resolvedMosqueId,
+      },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        isRestricted: true,
+        isArchived: true,
+      },
+    });
+
+    if (!fund) {
+      throw HttpError.notFound(
+        "Fund not found in this mosque.",
+        "FUND_NOT_FOUND",
+      );
+    }
+
+    if (fund.isArchived) {
+      throw HttpError.badRequest(
+        "Cannot associate category with an archived fund. Please select an active fund or restore the fund first.",
+        "FUND_ARCHIVED",
+      );
+    }
+  }
+
+  // 5. Apply updates atomically
+  try {
+    const updatedCategory = await prisma.category.update({
+      where: { id: currentCategory.id },
+      data: {
+        ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+        ...(input.fundId !== undefined ? { fundId: input.fundId } : {}),
+      },
+      select: {
+        id: true,
+        mosqueId: true,
+        fundId: true,
+        name: true,
+        type: true,
+        isArchived: true,
+        createdAt: true,
+        updatedAt: true,
+        fund: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            isRestricted: true,
+          },
+        },
+      },
+    });
+
+    return {
+      id: updatedCategory.id,
+      mosqueId: updatedCategory.mosqueId,
+      fundId: updatedCategory.fundId,
+      name: updatedCategory.name,
+      type: updatedCategory.type,
+      isArchived: updatedCategory.isArchived,
+      createdAt: updatedCategory.createdAt,
+      updatedAt: updatedCategory.updatedAt,
+      fund: updatedCategory.fund ?? null,
+    };
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      throw HttpError.conflict(
+        `A ${currentCategory.type.toLowerCase()} category named '${input.name}' already exists in this mosque.`,
+        "CATEGORY_NAME_EXISTS",
+      );
+    }
+    throw error;
+  }
+}
+
 

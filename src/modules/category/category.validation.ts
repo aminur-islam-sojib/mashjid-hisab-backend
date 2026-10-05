@@ -194,3 +194,79 @@ export function validateGetMosqueCategoriesQuery(query: unknown): GetMosqueCateg
 
   return result;
 }
+
+export interface UpdateCategoryInput {
+  name?: string;
+  fundId?: string | null;
+}
+
+/**
+ * Validates request payload for PATCH /api/mosques/:mosqueId/categories/:categoryId
+ *
+ * Rules:
+ * - At least one field must be provided (name or fundId).
+ * - name: optional string, 2-100 characters after trimming.
+ * - fundId: optional string (target fund CUID) or null to clear restriction.
+ */
+export function validateUpdateCategoryInput(body: unknown): UpdateCategoryInput {
+  if (!body || typeof body !== "object") {
+    throw HttpError.badRequest("Request body must be a JSON object.");
+  }
+
+  const raw = body as Record<string, unknown>;
+  const issues: ValidationIssue[] = [];
+  const input: UpdateCategoryInput = {};
+  let hasUpdateFields = false;
+
+  // -- name (optional) -------------------------------------------------------
+  if (raw["name"] !== undefined) {
+    hasUpdateFields = true;
+    if (typeof raw["name"] !== "string" || !raw["name"].trim()) {
+      issues.push({ field: "name", issue: "Category name cannot be empty." });
+    } else {
+      const trimmedName = raw["name"].trim();
+      if (trimmedName.length < 2) {
+        issues.push({
+          field: "name",
+          issue: "Category name must be at least 2 characters long.",
+        });
+      } else if (trimmedName.length > 100) {
+        issues.push({
+          field: "name",
+          issue: "Category name cannot exceed 100 characters.",
+        });
+      } else {
+        input.name = trimmedName;
+      }
+    }
+  }
+
+  // -- fundId (optional) -----------------------------------------------------
+  if (raw["fundId"] !== undefined) {
+    hasUpdateFields = true;
+    if (raw["fundId"] === null || raw["fundId"] === "") {
+      input.fundId = null;
+    } else if (typeof raw["fundId"] !== "string") {
+      issues.push({
+        field: "fundId",
+        issue: "Fund identifier must be a string or null.",
+      });
+    } else {
+      input.fundId = raw["fundId"].trim() || null;
+    }
+  }
+
+  if (issues.length > 0) {
+    throw HttpError.validationError(issues);
+  }
+
+  if (!hasUpdateFields) {
+    throw HttpError.badRequest(
+      "At least one field must be provided to update (name or fundId).",
+      "EMPTY_UPDATE_PAYLOAD",
+    );
+  }
+
+  return input;
+}
+

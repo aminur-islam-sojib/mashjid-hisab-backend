@@ -10,11 +10,13 @@ import {
   validateCreateCategoryInput,
   validateCategoryIdParam,
   validateGetMosqueCategoriesQuery,
+  validateUpdateCategoryInput,
 } from "./category.validation.js";
 import {
   createCategory,
   getCategoryById,
   getMosqueCategories,
+  updateCategory,
 } from "./category.service.js";
 
 /**
@@ -81,4 +83,28 @@ export const getMosqueCategoriesHandler = catchAsync(
     });
   },
 );
+
+/**
+ * PATCH /api/mosques/:mosqueId/categories/:categoryId
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER
+ *
+ * Updates name/fundId. Changing fundId on a category already used by past transactions
+ * does not rewrite history — it only affects future entries.
+ */
+export const updateCategoryHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const categoryId = validateCategoryIdParam(req.params["categoryId"]);
+    const input = validateUpdateCategoryInput(req.body);
+
+    const category = await updateCategory(mosqueId, categoryId, input);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Category updated successfully.",
+      data: category,
+    });
+  },
+);
+
 

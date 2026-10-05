@@ -13,6 +13,7 @@ import {
   createCategoryHandler,
   getCategoryByIdHandler,
   getMosqueCategoriesHandler,
+  updateCategoryHandler,
 } from "./category.controller.js";
 
 const categoryRouter: Router = Router({ mergeParams: true });
@@ -56,6 +57,20 @@ categoryRouter.get(
   authenticate,
   requireMosqueMembership(...OPERATIONAL_ROLES),
   getCategoryByIdHandler,
+);
+
+/**
+ * PATCH /api/mosques/:mosqueId/categories/:categoryId
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER
+ *
+ * Updates name/fundId. Changing fundId on a category already used by past transactions
+ * does not rewrite history — it only affects future entries.
+ */
+categoryRouter.patch(
+  "/:categoryId",
+  authenticate,
+  requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
+  updateCategoryHandler,
 );
 
 export default categoryRouter;
