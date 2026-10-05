@@ -8,12 +8,12 @@
 // All other roles live on a Membership row.
 // ---------------------------------------------------------------------------
 enum Role {
-  SUPER_ADMIN      // platform-level — not mosque-scoped
-  MOSQUE_ADMIN     // full control within a single mosque
-  TREASURER        // financial records & reporting
-  STAFF            // day-to-day operations
+  SUPER_ADMIN // platform-level — not mosque-scoped
+  MOSQUE_ADMIN // full control within a single mosque
+  TREASURER // financial records & reporting
+  STAFF // day-to-day operations
   COMMITTEE_MEMBER // advisory / governance body
-  MEMBER           // general mosque member
+  MEMBER // general mosque member
 }
 
 // ---------------------------------------------------------------------------
@@ -21,10 +21,10 @@ enum Role {
 // Drives access control: only ACTIVE memberships are allowed through guards.
 // ---------------------------------------------------------------------------
 enum MembershipStatus {
-  PENDING   // created directly with a userId already known (rare path)
-  ACTIVE    // full access granted
+  PENDING // created directly with a userId already known (rare path)
+  ACTIVE // full access granted
   SUSPENDED // access revoked without deleting audit history
-  REJECTED  // invite explicitly declined by the invitee
+  REJECTED // invite explicitly declined by the invitee
 }
 
 // ---------------------------------------------------------------------------
@@ -32,9 +32,9 @@ enum MembershipStatus {
 // Platform-level account state for the User.
 // ---------------------------------------------------------------------------
 enum UserStatus {
-  ACTIVE   // account in good standing
+  ACTIVE // account in good standing
   INACTIVE // voluntarily deactivated or dormant
-  BLOCKED  // banned / administratively blocked platform-wide
+  BLOCKED // banned / administratively blocked platform-wide
 }
 
 // ---------------------------------------------------------------------------
@@ -53,13 +53,13 @@ enum InviteStatus {
 // Classification of financial funds by Shariah and operational purpose.
 // ---------------------------------------------------------------------------
 enum FundType {
-  GENERAL      // unrestricted — spendable on anything
-  ZAKAT        // restricted — only the 8 shariah categories
+  GENERAL // unrestricted — spendable on anything
+  ZAKAT // restricted — only the 8 shariah categories
   SADAQAH
   CONSTRUCTION
   MADRASA
   QURBANI
-  WAQF         // property/rent income — disbursement-only by policy
+  WAQF // property/rent income — disbursement-only by policy
   IFTAR
   OTHER
 }
@@ -83,4 +83,19 @@ enum AccountType {
 enum CategoryType {
   INCOME
   EXPENSE
+}
+
+// ---------------------------------------------------------------------------
+// FamilyRelation
+// How a FamilyMember relates to the family's head.
+// ---------------------------------------------------------------------------
+enum FamilyRelation {
+  SPOUSE
+  SON
+  DAUGHTER
+  FATHER
+  MOTHER
+  SIBLING
+  GRANDPARENT
+  OTHER
 }

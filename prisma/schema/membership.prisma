@@ -38,6 +38,14 @@ model Membership {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // -- Family (optional, one of either, never both) --------------------------
+  /// Set if this Membership is the head of a Family. A Membership can head
+  /// at most one Family (enforced by Family.headMembershipId being @unique).
+  headOfFamily       Family?       @relation("FamilyHead")
+  /// Set if this Membership was created for someone who started as a light
+  /// FamilyMember record and later got their own login (Stage 3).
+  linkedFamilyMember FamilyMember? @relation("FamilyMemberLink")
+
   // -- Constraints & indices ------------------------------------------------
   /// A user may not hold more than one membership per mosque.
   @@unique([userId, mosqueId])
@@ -52,26 +60,26 @@ model Membership {
 // ----------------------------------------------------------------------------
 
 model MembershipInvite {
-  id          String       @id @default(cuid())
+  id String @id @default(cuid())
 
-  mosqueId    String
-  mosque      Mosque       @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+  mosqueId String
+  mosque   Mosque @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
 
   // The invited person, by contact info — they may not have a User yet.
-  email       String?
-  phone       String?
-  role        Role         @default(MEMBER)
+  email String?
+  phone String?
+  role  Role    @default(MEMBER)
 
-  tokenHash   String       @unique // raw token goes in the emailed/SMS link only
-  status      InviteStatus @default(PENDING)
+  tokenHash String       @unique // raw token goes in the emailed/SMS link only
+  status    InviteStatus @default(PENDING)
 
   invitedById String
-  invitedBy   User         @relation("InviteSentBy", fields: [invitedById], references: [id])
+  invitedBy   User   @relation("InviteSentBy", fields: [invitedById], references: [id])
 
-  expiresAt   DateTime
-  acceptedAt  DateTime?
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   @@index([mosqueId])
   @@index([email])

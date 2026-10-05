@@ -1,0 +1,68 @@
+// =============================================================================
+// family.prisma — Family & FamilyMember models
+//
+// Design notes:
+//  • A Family's head IS an existing Membership — never duplicated as a
+//    FamilyMember row, which would double-count household size.
+//  • The head is whoever created the family (or was assigned via
+//    transfer-head) — not computed from date of birth. DOB is optional and
+//    often missing, so "eldest" is a social convention the UI can nudge
+//    toward, not a rule the database can safely enforce.
+//  • FamilyMember starts as a light, loginless record — name + relation are
+//    the only required fields. If that person later gets their own account
+//    (via the Stage 3 admin-direct-create flow), linkedMembershipId is set
+//    on the SAME row — it is never recreated, just linked.
+//  • headMembershipId is @unique: one Membership can only head one Family.
+//  • linkedMembershipId is @unique: one Membership can only be linked to one
+//    FamilyMember record.
+// =============================================================================
+
+model Family {
+  id       String @id @default(cuid())
+  mosqueId String
+  mosque   Mosque @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  /// Household label, e.g. "Sojib Paribar". Admin/head-editable, not a legal name.
+  name    String
+  address String?
+
+  /// The head's own Membership — see design notes above.
+  headMembershipId String     @unique
+  headMembership   Membership @relation("FamilyHead", fields: [headMembershipId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members FamilyMember[]
+
+  @@index([mosqueId])
+  @@map("families")
+}
+
+model FamilyMember {
+  id       String @id @default(cuid())
+  familyId String
+  family   Family @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  /// Required — the only two fields a light, loginless record needs.
+  name     String
+  relation FamilyRelation
+
+  // -- Optional details ------------------------------------------------------
+  dateOfBirth DateTime?
+  gender      String?
+  phone       String?
+  occupation  String?
+  bloodGroup  String?
+
+  /// Set only once this person gets their own login (Stage 3's
+  /// admin-direct-create). Until then this row is pure data, no account.
+  linkedMembershipId String?     @unique
+  linkedMembership   Membership? @relation("FamilyMemberLink", fields: [linkedMembershipId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([familyId])
+  @@map("family_members")
+}
