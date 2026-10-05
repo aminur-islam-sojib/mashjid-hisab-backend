@@ -9,11 +9,13 @@ import {
   FINANCIAL_OPERATOR_ROLES,
   OVERSIGHT_ROLES,
 } from "../../middlewares/mosque.middleware.js";
+import { Role } from "../../../generated/prisma/client.js";
 import {
   createAccountHandler,
   getAccountByIdHandler,
   getMosqueAccountsHandler,
   updateAccountHandler,
+  archiveAccountHandler,
 } from "./account.controller.js";
 
 const accountRouter: Router = Router({ mergeParams: true });
@@ -71,6 +73,20 @@ accountRouter.patch(
   authenticate,
   requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
   updateAccountHandler,
+);
+
+/**
+ * POST /api/mosques/:mosqueId/accounts/:accountId/archive
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Soft-deletes the account (sets isArchived: true).
+ * Blocks if the account has a non-zero balance.
+ */
+accountRouter.post(
+  "/:accountId/archive",
+  authenticate,
+  requireMosqueMembership(Role.MOSQUE_ADMIN),
+  archiveAccountHandler,
 );
 
 export default accountRouter;

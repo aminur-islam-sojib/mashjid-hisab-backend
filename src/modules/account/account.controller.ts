@@ -17,6 +17,7 @@ import {
   getAccountById,
   getMosqueAccounts,
   updateAccount,
+  archiveAccount,
 } from "./account.service.js";
 
 /**
@@ -105,3 +106,26 @@ export const updateAccountHandler = catchAsync(
     });
   },
 );
+
+/**
+ * POST /api/mosques/:mosqueId/accounts/:accountId/archive
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Soft-deletes the account (sets isArchived: true).
+ * Blocks if the account has a non-zero balance.
+ */
+export const archiveAccountHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const accountId = validateAccountIdParam(req.params["accountId"]);
+
+    const account = await archiveAccount(mosqueId, accountId);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Account archived successfully.",
+      data: account,
+    });
+  },
+);
+

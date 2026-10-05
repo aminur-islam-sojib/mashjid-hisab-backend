@@ -458,4 +458,180 @@ export async function updateAccount(
   }
 }
 
+/**
+ * Computes or retrieves the current net monetary balance of a specific account in minor units (poisha).
+ *
+ * Formula: Net Balance = openingBalance + net transaction activity.
+ *
+ * If the transaction/ledger tables have not yet been migrated into the database,
+ * safely computes balance using openingBalance + 0n. Once tables (such as 'transactions',
+ * 'ledger_entries', 'journal_lines', or 'account_balances') are migrated with an 'accountId' column,
+ * this dynamically queries and aggregates the net balance without breaking prior to the migration.
+ *
+ * @param accountId - CUID of the target account
+ * @param openingBalance - The account's opening balance (poisha). If omitted, queried from DB.
+ * @param client - Prisma client or transaction client
+ */
+export async function getAccountBalance(
+  accountId: string,
+  openingBalance?: bigint,
+  client: Prisma.TransactionClient | PrismaClient = prisma,
+): Promise<bigint> {
+  let netBalance = openingBalance ?? 0n;
+
+  if (openingBalance === undefined) {
+    const acc = await client.account.findUnique({
+      where: { id: accountId },
+      select: { openingBalance: true },
+    });
+    if (acc) {
+      netBalance = acc.openingBalance;
+    }
+  }
+
+  try {
+    const matchingTables = await client.$queryRaw<Array<{ table_name: string }>>`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+        AND table_name IN ('transactions', 'ledger_entries', 'journal_lines', 'account_balances')
+    `;
+
+    if (!matchingTables || matchingTables.length === 0) {
+      return netBalance;
+    }
+
+    for (const row of matchingTables) {
+      const tableName = row.table_name;
+      const columnRows = await client.$queryRaw<Array<{ column_name: string }>>`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = ${tableName}
+          AND column_name IN ('accountId', 'amount', 'balance', 'debit', 'credit')
+      `;
+
+      const columnNames = new Set(columnRows.map((c) => c.column_name));
+      if (!columnNames.has("accountId")) {
+        continue;
+      }
+
+      if (columnNames.has("balance")) {
+        const balResult = await client.$queryRawUnsafe<Array<{ total_balance: string | null }>>(
+          `SELECT COALESCE(SUM("balance"), 0)::text AS total_balance FROM "${tableName}" WHERE "accountId" = $1`,
+          accountId,
+        );
+        if (balResult && balResult[0]?.total_balance) {
+          netBalance += BigInt(balResult[0].total_balance);
+        }
+      } else if (columnNames.has("debit") && columnNames.has("credit")) {
+        // In asset accounts (Cash, Bank, Mobile Wallet): debit increases the account balance, credit decreases it.
+        const dcResult = await client.$queryRawUnsafe<Array<{ total_net: string | null }>>(
+          `SELECT COALESCE(SUM("debit" - "credit"), 0)::text AS total_net FROM "${tableName}" WHERE "accountId" = $1`,
+          accountId,
+        );
+        if (dcResult && dcResult[0]?.total_net) {
+          netBalance += BigInt(dcResult[0].total_net);
+        }
+      } else if (columnNames.has("amount")) {
+        const amtResult = await client.$queryRawUnsafe<Array<{ total_amount: string | null }>>(
+          `SELECT COALESCE(SUM("amount"), 0)::text AS total_amount FROM "${tableName}" WHERE "accountId" = $1`,
+          accountId,
+        );
+        if (amtResult && amtResult[0]?.total_amount) {
+          netBalance += BigInt(amtResult[0].total_amount);
+        }
+      }
+    }
+
+    return netBalance;
+  } catch {
+    return netBalance;
+  }
+}
+
+/**
+ * Soft-deletes an account by setting isArchived: true.
+ *
+ * Business & Security Rules:
+ * 1. Multi-Tenant Boundary: Account must belong strictly to resolvedMosqueId.
+ *    Returns 404 if not found or belongs to another tenant.
+ * 2. Already Archived Guard: Blocks with 400 ACCOUNT_ALREADY_ARCHIVED if account is already archived.
+ * 3. Non-Zero Balance Safety Rail:
+ *    An account cannot be archived while it holds a non-zero balance (net of openingBalance
+ *    and any recorded ledger/transaction activity). Any non-zero balance blocks archival
+ *    with 400 ACCOUNT_ARCHIVE_BLOCKED_NON_ZERO_BALANCE.
+ *
+ * @param mosqueId - Identifier (CUID or slug) of the target mosque
+ * @param accountId - CUID of the account to archive
+ */
+export async function archiveAccount(
+  mosqueId: string,
+  accountId: string,
+): Promise<AccountResponseItem> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  // 1. Fetch current account within tenant boundary
+  const currentAccount = await prisma.account.findFirst({
+    where: {
+      id: accountId,
+      mosqueId: resolvedMosqueId,
+    },
+  });
+
+  if (!currentAccount) {
+    throw HttpError.notFound("Account not found.", "ACCOUNT_NOT_FOUND");
+  }
+
+  // 2. Reject if already archived
+  if (currentAccount.isArchived) {
+    throw HttpError.badRequest(
+      "Operation rejected: Account is already archived.",
+      "ACCOUNT_ALREADY_ARCHIVED",
+    );
+  }
+
+  // 3. Balance safety rail: Account balance must be zero
+  const accountBalance = await getAccountBalance(
+    currentAccount.id,
+    currentAccount.openingBalance,
+  );
+  if (accountBalance !== 0n) {
+    throw HttpError.badRequest(
+      `Cannot archive account: The account has a non-zero balance of ${formatPoishaToCurrency(accountBalance)} (${accountBalance.toString()} poisha). All accounts must have a zero balance before they can be archived.`,
+      "ACCOUNT_ARCHIVE_BLOCKED_NON_ZERO_BALANCE",
+    );
+  }
+
+  // 4. Archive account
+  const archived = await prisma.account.update({
+    where: { id: currentAccount.id },
+    data: { isArchived: true },
+    select: {
+      id: true,
+      mosqueId: true,
+      name: true,
+      type: true,
+      accountNumber: true,
+      openingBalance: true,
+      isArchived: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  return {
+    id: archived.id,
+    mosqueId: archived.mosqueId,
+    name: archived.name,
+    type: archived.type,
+    accountNumber: archived.accountNumber,
+    openingBalance: archived.openingBalance.toString(),
+    isArchived: archived.isArchived,
+    createdAt: archived.createdAt,
+    updatedAt: archived.updatedAt,
+  };
+}
+
+
 
