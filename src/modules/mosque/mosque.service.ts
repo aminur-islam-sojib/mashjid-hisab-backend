@@ -417,7 +417,7 @@ export async function getUserActiveMembership(
  * Reusable tenant resolver: Ensures mosque exists and is not soft-deleted.
  * Resolves both CUID and slug to canonical CUID.
  */
-async function resolveActiveMosqueId(mosqueId: string): Promise<string> {
+export async function resolveActiveMosqueId(mosqueId: string): Promise<string> {
   const mosque = await prisma.mosque.findFirst({
     where: {
       OR: [
