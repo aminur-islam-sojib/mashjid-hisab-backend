@@ -4,12 +4,16 @@
 
 import { Router } from "express";
 import { authenticate } from "../../middlewares/auth.middleware.js";
-import { requireMosqueMembership } from "../../middlewares/mosque.middleware.js";
+import {
+  requireMosqueMembership,
+  OVERSIGHT_ROLES,
+} from "../../middlewares/mosque.middleware.js";
 import { Role } from "../../../generated/prisma/client.js";
 import {
   createMosqueHandler,
   getUserMosquesHandler,
   getMosqueSettingsHandler,
+  getMosqueMembersHandler,
   updateMosqueHandler,
   archiveMosqueHandler,
   getPublicMosqueBySlugHandler,
@@ -24,6 +28,19 @@ const mosqueRouter: Router = Router();
  * Lists every mosque the caller has an ACTIVE Membership in — powers the mosque switcher.
  */
 mosqueRouter.get("/", authenticate, getUserMosquesHandler);
+
+/**
+ * GET /api/mosques/:mosqueId/members
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER
+ *
+ * Lists all Memberships for the mosque with user name/role/status — the admin's people-management screen.
+ */
+mosqueRouter.get(
+  "/:mosqueId/members",
+  authenticate,
+  requireMosqueMembership(...OVERSIGHT_ROLES),
+  getMosqueMembersHandler,
+);
 
 /**
  * GET /api/mosques/:mosqueId

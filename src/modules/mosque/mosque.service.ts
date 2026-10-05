@@ -17,6 +17,7 @@ import {
 import type {
   CreateMosqueInput,
   UpdateMosqueInput,
+  GetMosqueMembersQuery,
 } from "./mosque.validation.js";
 
 export interface CreateMosqueResult {
@@ -77,6 +78,29 @@ export interface PublicMosqueProfile {
   name: string;
   slug: string;
   address: string | null;
+}
+
+export interface MosqueMemberItem {
+  id: string;
+  userId: string;
+  mosqueId: string;
+  role: Role;
+  status: MembershipStatus;
+  createdAt: Date;
+  updatedAt: Date;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    phone: string | null;
+    status: UserStatus;
+    avatarUrl: string | null;
+  };
+  invitedBy: {
+    id: string;
+    name: string;
+    email: string;
+  } | null;
 }
 
 /**
@@ -360,6 +384,121 @@ export async function getUserActiveMembership(
       status: MembershipStatus.ACTIVE,
     },
   });
+}
+
+/**
+ * Lists all Memberships for a mosque with user details (name, email, phone, role, status).
+ * Powers the administrator's people-management / members directory screen.
+ *
+ * Security & Tenancy guarantees:
+ * 1. Tenant Verification: Ensures target mosque exists and is not archived.
+ * 2. Data Minimisation: Whitelists non-sensitive profile fields; strictly prevents
+ *    exposure of password hashes, session tokens, or auth secrets.
+ * 3. Search Sanitisation: Scopes user search to members belonging strictly to this mosque.
+ *
+ * @param mosqueId - Target mosque unique ID (or slug)
+ * @param options - Optional query filters (role, status, search)
+ * @returns Array of member records with user profiles
+ */
+export async function getMosqueMembers(
+  mosqueId: string,
+  options?: GetMosqueMembersQuery,
+): Promise<MosqueMemberItem[]> {
+  // 1. Verify tenant exists and is not soft-deleted
+  const mosque = await prisma.mosque.findFirst({
+    where: {
+      OR: [
+        { id: mosqueId },
+        { slug: mosqueId },
+      ],
+    },
+    select: { id: true, isArchived: true },
+  });
+
+  if (!mosque || mosque.isArchived) {
+    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
+  }
+
+  const resolvedMosqueId = mosque.id;
+
+  // 2. Fetch memberships strictly scoped to resolved tenant ID
+  const memberships = await prisma.membership.findMany({
+    where: {
+      mosqueId: resolvedMosqueId,
+      ...(options?.role ? { role: options.role } : {}),
+      ...(options?.status ? { status: options.status } : {}),
+      ...(options?.search
+        ? {
+            user: {
+              OR: [
+                { name: { contains: options.search, mode: "insensitive" } },
+                { email: { contains: options.search, mode: "insensitive" } },
+                { phone: { contains: options.search, mode: "insensitive" } },
+              ],
+            },
+          }
+        : {}),
+    },
+    select: {
+      id: true,
+      userId: true,
+      mosqueId: true,
+      role: true,
+      status: true,
+      createdAt: true,
+      updatedAt: true,
+      user: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          status: true,
+          profile: {
+            select: {
+              avatarUrl: true,
+            },
+          },
+        },
+      },
+      invitedBy: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+    },
+    orderBy: {
+      createdAt: "asc",
+    },
+  });
+
+  // 3. Map into clean, safe DTO
+  return memberships.map((m) => ({
+    id: m.id,
+    userId: m.userId,
+    mosqueId: m.mosqueId,
+    role: m.role,
+    status: m.status,
+    createdAt: m.createdAt,
+    updatedAt: m.updatedAt,
+    user: {
+      id: m.user.id,
+      name: m.user.name,
+      email: m.user.email,
+      phone: m.user.phone,
+      status: m.user.status,
+      avatarUrl: m.user.profile?.avatarUrl ?? null,
+    },
+    invitedBy: m.invitedBy
+      ? {
+          id: m.invitedBy.id,
+          name: m.invitedBy.name,
+          email: m.invitedBy.email,
+        }
+      : null,
+  }));
 }
 
 /**

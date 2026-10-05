@@ -4,6 +4,7 @@
 
 import { HttpError, type ValidationIssue } from "../../errors/HttpError.js";
 import { isValidSlug } from "../../utils/slug.js";
+import { Role, MembershipStatus } from "../../../generated/prisma/client.js";
 
 export interface CreateMosqueInput {
   name: string;
@@ -17,6 +18,12 @@ export interface GetUserMosquesQuery {
   search?: string;
 }
 
+export interface GetMosqueMembersQuery {
+  role?: Role;
+  status?: MembershipStatus;
+  search?: string;
+}
+
 /**
  * Validates query parameters for GET /api/mosques
  */
@@ -24,6 +31,56 @@ export function validateGetUserMosquesQuery(query: unknown): GetUserMosquesQuery
   if (!query || typeof query !== "object") return {};
   const raw = query as Record<string, unknown>;
   const result: GetUserMosquesQuery = {};
+
+  if (raw["search"] !== undefined && raw["search"] !== null && raw["search"] !== "") {
+    if (typeof raw["search"] !== "string") {
+      throw HttpError.badRequest("Search query must be a string.");
+    }
+    const trimmed = raw["search"].trim();
+    if (trimmed.length > 100) {
+      throw HttpError.badRequest("Search query cannot exceed 100 characters.");
+    }
+    result.search = trimmed;
+  }
+
+  return result;
+}
+
+/**
+ * Validates query parameters for GET /api/mosques/:mosqueId/members
+ */
+export function validateGetMosqueMembersQuery(query: unknown): GetMosqueMembersQuery {
+  if (!query || typeof query !== "object") return {};
+  const raw = query as Record<string, unknown>;
+  const result: GetMosqueMembersQuery = {};
+
+  if (raw["role"] !== undefined && raw["role"] !== null && raw["role"] !== "") {
+    if (typeof raw["role"] !== "string") {
+      throw HttpError.badRequest("Role filter must be a string.", "INVALID_ROLE");
+    }
+    const roleUpper = raw["role"].trim().toUpperCase();
+    if (!Object.values(Role).includes(roleUpper as Role)) {
+      throw HttpError.badRequest(
+        `Invalid role '${raw["role"]}'. Allowed roles: ${Object.values(Role).join(", ")}.`,
+        "INVALID_ROLE",
+      );
+    }
+    result.role = roleUpper as Role;
+  }
+
+  if (raw["status"] !== undefined && raw["status"] !== null && raw["status"] !== "") {
+    if (typeof raw["status"] !== "string") {
+      throw HttpError.badRequest("Status filter must be a string.", "INVALID_STATUS");
+    }
+    const statusUpper = raw["status"].trim().toUpperCase();
+    if (!Object.values(MembershipStatus).includes(statusUpper as MembershipStatus)) {
+      throw HttpError.badRequest(
+        `Invalid status '${raw["status"]}'. Allowed statuses: ${Object.values(MembershipStatus).join(", ")}.`,
+        "INVALID_STATUS",
+      );
+    }
+    result.status = statusUpper as MembershipStatus;
+  }
 
   if (raw["search"] !== undefined && raw["search"] !== null && raw["search"] !== "") {
     if (typeof raw["search"] !== "string") {
