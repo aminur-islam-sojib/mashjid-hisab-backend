@@ -163,3 +163,160 @@ export function validateUpdateMembershipInput(body: unknown): UpdateMembershipIn
 
   return input;
 }
+
+// ---------------------------------------------------------------------------
+// Invitation Validation
+// ---------------------------------------------------------------------------
+
+export const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+export const PHONE_RE = /^\+?[0-9]{7,15}$/;
+
+export interface CreateMembershipInviteInput {
+  mosqueId: string;
+  email?: string;
+  phone?: string;
+  role: Role;
+}
+
+/**
+ * Validates payload for POST /api/memberships/invite
+ *
+ * Rules:
+ * - mosqueId: required (from body or route parameter fallback)
+ * - email / phone: at least one contact channel must be provided and valid
+ * - role: optional, defaults to Role.MEMBER, must be in ALLOWED_MEMBERSHIP_ROLES
+ */
+export function validateCreateMembershipInviteInput(
+  body: unknown,
+  fallbackMosqueId?: string,
+): CreateMembershipInviteInput {
+  if (!body || typeof body !== "object") {
+    throw HttpError.badRequest("Request body must be a JSON object.");
+  }
+
+  const raw = body as Record<string, unknown>;
+  const issues: ValidationIssue[] = [];
+
+  // -- mosqueId --------------------------------------------------------------
+  const rawMosqueId = raw["mosqueId"] ?? fallbackMosqueId;
+  let mosqueId = "";
+  if (typeof rawMosqueId !== "string" || !rawMosqueId.trim()) {
+    issues.push({
+      field: "mosqueId",
+      issue: "Target mosque identifier (mosqueId) is required.",
+    });
+  } else {
+    mosqueId = rawMosqueId.trim();
+  }
+
+  // -- email (optional) ------------------------------------------------------
+  let email: string | undefined;
+  if (raw["email"] !== undefined && raw["email"] !== null && raw["email"] !== "") {
+    if (typeof raw["email"] !== "string") {
+      issues.push({ field: "email", issue: "Email must be a valid string." });
+    } else {
+      const trimmedEmail = raw["email"].trim().toLowerCase();
+      if (!EMAIL_RE.test(trimmedEmail)) {
+        issues.push({ field: "email", issue: "Must be a valid email address." });
+      } else {
+        email = trimmedEmail;
+      }
+    }
+  }
+
+  // -- phone (optional) ------------------------------------------------------
+  let phone: string | undefined;
+  if (raw["phone"] !== undefined && raw["phone"] !== null && raw["phone"] !== "") {
+    const rawPhone = String(raw["phone"]).trim();
+    if (!PHONE_RE.test(rawPhone)) {
+      issues.push({
+        field: "phone",
+        issue: "Must be a valid phone number (7–15 digits, optional leading +).",
+      });
+    } else {
+      phone = rawPhone;
+    }
+  }
+
+  // At least one contact method must be provided
+  if (!email && !phone) {
+    issues.push({
+      field: "email",
+      issue: "At least one contact method (email or phone) is required to invite a member.",
+    });
+  }
+
+  // -- role (optional, defaults to MEMBER) -----------------------------------
+  let role: Role = Role.MEMBER;
+  if (raw["role"] !== undefined && raw["role"] !== null && raw["role"] !== "") {
+    if (typeof raw["role"] !== "string") {
+      issues.push({ field: "role", issue: "Role must be a string." });
+    } else {
+      const roleUpper = raw["role"].trim().toUpperCase();
+      if (roleUpper === Role.SUPER_ADMIN) {
+        issues.push({
+          field: "role",
+          issue: "SUPER_ADMIN is a platform-level role and cannot be assigned to a mosque membership.",
+        });
+      } else if (!ALLOWED_MEMBERSHIP_ROLES.includes(roleUpper as Role)) {
+        issues.push({
+          field: "role",
+          issue: `Invalid role '${raw["role"]}'. Allowed membership roles: ${ALLOWED_MEMBERSHIP_ROLES.join(", ")}.`,
+        });
+      } else {
+        role = roleUpper as Role;
+      }
+    }
+  }
+
+  if (issues.length > 0) {
+    throw HttpError.validationError(issues);
+  }
+
+  return {
+    mosqueId,
+    email,
+    phone,
+    role,
+  };
+}
+
+/**
+ * Validates route parameter :id for invitations
+ */
+export function validateInviteIdParam(param: unknown): string {
+  if (typeof param !== "string" || !param.trim()) {
+    throw HttpError.badRequest(
+      "Invitation identifier is required.",
+      "INVALID_INVITE_ID",
+    );
+  }
+  return param.trim();
+}
+
+export interface AcceptMembershipInviteInput {
+  token?: string;
+}
+
+/**
+ * Validates payload for POST /api/memberships/invites/:id/accept
+ */
+export function validateAcceptMembershipInviteInput(
+  body: unknown,
+): AcceptMembershipInviteInput {
+  if (!body || typeof body !== "object") {
+    return {};
+  }
+  const raw = body as Record<string, unknown>;
+  const input: AcceptMembershipInviteInput = {};
+
+  if (raw["token"] !== undefined && raw["token"] !== null && raw["token"] !== "") {
+    if (typeof raw["token"] !== "string" || !raw["token"].trim()) {
+      throw HttpError.badRequest("Token must be a non-empty string.", "INVALID_TOKEN");
+    }
+    input.token = raw["token"].trim();
+  }
+
+  return input;
+}
+

@@ -10,12 +10,17 @@ import {
   validateGetMosqueMembersQuery,
   validateMembershipIdParam,
   validateUpdateMembershipInput,
+  validateCreateMembershipInviteInput,
+  validateInviteIdParam,
+  validateAcceptMembershipInviteInput,
 } from "./membership.validation.js";
 import {
   getMosqueMembers,
   updateMembership,
   removeMember,
   leaveMosque,
+  createMembershipInvite,
+  acceptMembershipInvite,
 } from "./membership.service.js";
 
 /**
@@ -105,3 +110,53 @@ export const removeMemberHandler = catchAsync(
     });
   },
 );
+
+/**
+ * POST /api/memberships/invite
+ * Access: Authenticated + MOSQUE_ADMIN or TREASURER
+ *
+ * Creates a MembershipInvite for the target mosque by email/phone.
+ */
+export const createMembershipInviteHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const callerUserId = req.user!.sub;
+    const fallbackMosqueId =
+      req.mosqueId ||
+      (typeof req.params["mosqueId"] === "string" ? req.params["mosqueId"] : undefined);
+    const input = validateCreateMembershipInviteInput(req.body, fallbackMosqueId);
+
+    const result = await createMembershipInvite(callerUserId, input);
+
+    sendResponse(res, {
+      statusCode: 201,
+      message: "Membership invitation created successfully.",
+      data: {
+        ...result.invite,
+        token: result.token,
+      },
+    });
+  },
+);
+
+/**
+ * POST /api/memberships/invites/:id/accept
+ * Access: Authenticated, matching invite contact
+ *
+ * Converts the invite into an ACTIVE Membership.
+ */
+export const acceptMembershipInviteHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const callerUserId = req.user!.sub;
+    const inviteId = validateInviteIdParam(req.params["id"]);
+    const input = validateAcceptMembershipInviteInput(req.body);
+
+    const result = await acceptMembershipInvite(callerUserId, inviteId, input);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: result.message,
+      data: result.membership,
+    });
+  },
+);
+

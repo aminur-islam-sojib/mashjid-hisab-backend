@@ -14,9 +14,39 @@ import {
   updateMembershipHandler,
   leaveMosqueHandler,
   removeMemberHandler,
+  createMembershipInviteHandler,
+  acceptMembershipInviteHandler,
 } from "./membership.controller.js";
 
 const membershipRouter: Router = Router({ mergeParams: true });
+
+// ---------------------------------------------------------------------------
+// Invitation Endpoints
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/memberships/invite
+ * Access: Authenticated (caller must be MOSQUE_ADMIN or TREASURER in target mosque)
+ *
+ * Creates a MembershipInvite for the target mosque by email/phone.
+ */
+membershipRouter.post(
+  "/invite",
+  authenticate,
+  createMembershipInviteHandler,
+);
+
+/**
+ * POST /api/memberships/invites/:id/accept
+ * Access: Authenticated, matching invite contact
+ *
+ * Converts the invite into an ACTIVE Membership.
+ */
+membershipRouter.post(
+  "/invites/:id/accept",
+  authenticate,
+  acceptMembershipInviteHandler,
+);
 
 /**
  * GET /api/mosques/:mosqueId/members

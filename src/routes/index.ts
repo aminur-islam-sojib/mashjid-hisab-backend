@@ -9,18 +9,18 @@ import userRouter from "../modules/user/user.routes.js";
 import mosqueRouter, {
   publicMosqueRouter,
 } from "../modules/mosque/mosque.routes.js";
+import membershipRouter from "../modules/membership/membership.routes.js";
 
 const apiRouter: Router = Router();
 
 apiRouter.use("/auth", authRouter);
 apiRouter.use("/users", userRouter);
 apiRouter.use("/mosques", mosqueRouter);
+apiRouter.use("/memberships", membershipRouter);
 
 // Public routes (transparency, public mosque profile, donation summaries)
 const publicRouter: Router = Router();
 publicRouter.use("/mosques", publicMosqueRouter);
 apiRouter.use("/public", publicRouter);
-
-// future: apiRouter.use("/members", memberRouter);
 
 export default apiRouter;
