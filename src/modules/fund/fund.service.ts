@@ -449,3 +449,165 @@ export async function updateFund(
   }
 }
 
+/**
+ * Computes or retrieves the current net monetary balance of a specific fund in minor units (poisha).
+ *
+ * If the transaction/ledger tables have not yet been migrated into the database,
+ * safely returns 0n. Once tables (such as 'transactions', 'ledger_entries', 'journal_lines',
+ * or 'fund_balances') are migrated with a 'fundId' column, this dynamically queries
+ * and aggregates the net balance without breaking prior to the migration.
+ *
+ * @param fundId - CUID of the target fund
+ * @param client - Prisma client or transaction client
+ */
+export async function getFundBalance(
+  fundId: string,
+  client: Prisma.TransactionClient | PrismaClient = prisma,
+): Promise<bigint> {
+  try {
+    const matchingTables = await client.$queryRaw<Array<{ table_name: string }>>`
+      SELECT table_name 
+      FROM information_schema.tables 
+      WHERE table_schema = 'public' 
+        AND table_name IN ('transactions', 'ledger_entries', 'journal_lines', 'fund_balances')
+    `;
+
+    if (!matchingTables || matchingTables.length === 0) {
+      return 0n;
+    }
+
+    let netBalance = 0n;
+    for (const row of matchingTables) {
+      const tableName = row.table_name;
+      const columnRows = await client.$queryRaw<Array<{ column_name: string }>>`
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = ${tableName}
+          AND column_name IN ('fundId', 'amount', 'balance', 'debit', 'credit')
+      `;
+
+      const columnNames = new Set(columnRows.map((c) => c.column_name));
+      if (!columnNames.has("fundId")) {
+        continue;
+      }
+
+      if (columnNames.has("balance")) {
+        const balResult = await client.$queryRawUnsafe<Array<{ total_balance: string | null }>>(
+          `SELECT COALESCE(SUM("balance"), 0)::text AS total_balance FROM "${tableName}" WHERE "fundId" = $1`,
+          fundId,
+        );
+        if (balResult && balResult[0]?.total_balance) {
+          netBalance += BigInt(balResult[0].total_balance);
+        }
+      } else if (columnNames.has("debit") && columnNames.has("credit")) {
+        const dcResult = await client.$queryRawUnsafe<Array<{ total_net: string | null }>>(
+          `SELECT COALESCE(SUM("credit" - "debit"), 0)::text AS total_net FROM "${tableName}" WHERE "fundId" = $1`,
+          fundId,
+        );
+        if (dcResult && dcResult[0]?.total_net) {
+          netBalance += BigInt(dcResult[0].total_net);
+        }
+      } else if (columnNames.has("amount")) {
+        const amtResult = await client.$queryRawUnsafe<Array<{ total_amount: string | null }>>(
+          `SELECT COALESCE(SUM("amount"), 0)::text AS total_amount FROM "${tableName}" WHERE "fundId" = $1`,
+          fundId,
+        );
+        if (amtResult && amtResult[0]?.total_amount) {
+          netBalance += BigInt(amtResult[0].total_amount);
+        }
+      }
+    }
+
+    return netBalance;
+  } catch {
+    return 0n;
+  }
+}
+
+/**
+ * Soft-deletes a fund by setting isArchived: true.
+ *
+ * Business & Security Rules:
+ * 1. Multi-Tenant Boundary: Fund must belong strictly to resolvedMosqueId.
+ *    Returns 404 if not found or belongs to another tenant.
+ * 2. Already Archived Guard: Blocks with 400 FUND_ALREADY_ARCHIVED if fund is already archived.
+ * 3. Non-Zero Balance Safety Rail:
+ *    A fund cannot be archived while it holds a non-zero balance. Once ledger/transactions
+ *    exist, any non-zero balance blocks archival with 400 FUND_ARCHIVE_BLOCKED_NON_ZERO_BALANCE.
+ *
+ * @param mosqueId - Identifier (CUID or slug) of the target mosque
+ * @param fundId - CUID of the fund to archive
+ */
+export async function archiveFund(
+  mosqueId: string,
+  fundId: string,
+): Promise<FundResponseItem> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  // 1. Fetch current fund within tenant boundary
+  const currentFund = await prisma.fund.findFirst({
+    where: {
+      id: fundId,
+      mosqueId: resolvedMosqueId,
+    },
+  });
+
+  if (!currentFund) {
+    throw HttpError.notFound("Fund not found.", "FUND_NOT_FOUND");
+  }
+
+  // 2. Reject if already archived
+  if (currentFund.isArchived) {
+    throw HttpError.badRequest(
+      "Operation rejected: Fund is already archived.",
+      "FUND_ALREADY_ARCHIVED",
+    );
+  }
+
+  // 3. Balance safety rail: Fund balance must be zero
+  const fundBalance = await getFundBalance(currentFund.id);
+  if (fundBalance !== 0n) {
+    throw HttpError.badRequest(
+      `Cannot archive fund: The fund has a non-zero balance of ${fundBalance.toString()}. All funds must have a zero balance before they can be archived.`,
+      "FUND_ARCHIVE_BLOCKED_NON_ZERO_BALANCE",
+    );
+  }
+
+  // 4. Archive fund
+  const archived = await prisma.fund.update({
+    where: { id: currentFund.id },
+    data: { isArchived: true },
+    select: {
+      id: true,
+      mosqueId: true,
+      name: true,
+      type: true,
+      isRestricted: true,
+      description: true,
+      isArchived: true,
+      createdAt: true,
+      updatedAt: true,
+      _count: {
+        select: {
+          categories: true,
+        },
+      },
+    },
+  });
+
+  return {
+    id: archived.id,
+    mosqueId: archived.mosqueId,
+    name: archived.name,
+    type: archived.type,
+    isRestricted: archived.isRestricted,
+    description: archived.description,
+    isArchived: archived.isArchived,
+    createdAt: archived.createdAt,
+    updatedAt: archived.updatedAt,
+    categoryCount: archived._count.categories,
+  };
+}
+
+

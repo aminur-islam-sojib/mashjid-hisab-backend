@@ -17,6 +17,7 @@ import {
   getMosqueFunds,
   getFundById,
   updateFund,
+  archiveFund,
 } from "./fund.service.js";
 
 /**
@@ -104,4 +105,27 @@ export const updateFundHandler = catchAsync(
     });
   },
 );
+
+/**
+ * POST /api/mosques/:mosqueId/funds/:fundId/archive
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Soft-deletes the fund (sets isArchived: true).
+ * Blocks if the fund has a non-zero balance.
+ */
+export const archiveFundHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const fundId = validateFundIdParam(req.params["fundId"]);
+
+    const fund = await archiveFund(mosqueId, fundId);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Fund archived successfully.",
+      data: fund,
+    });
+  },
+);
+
 

@@ -14,6 +14,7 @@ import {
   getMosqueFundsHandler,
   getFundByIdHandler,
   updateFundHandler,
+  archiveFundHandler,
 } from "./fund.controller.js";
 
 const fundRouter: Router = Router({ mergeParams: true });
@@ -73,4 +74,19 @@ fundRouter.patch(
   updateFundHandler,
 );
 
+/**
+ * POST /api/mosques/:mosqueId/funds/:fundId/archive
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Soft-deletes the fund (sets isArchived: true).
+ * Blocks if the fund has a non-zero balance.
+ */
+fundRouter.post(
+  "/:fundId/archive",
+  authenticate,
+  requireMosqueMembership(Role.MOSQUE_ADMIN),
+  archiveFundHandler,
+);
+
 export default fundRouter;
+
