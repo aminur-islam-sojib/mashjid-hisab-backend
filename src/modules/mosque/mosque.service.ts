@@ -5,6 +5,7 @@
 import { prisma } from "../../lib/prisma.js";
 import { HttpError } from "../../errors/HttpError.js";
 import { generateUniqueSlug } from "../../utils/slug.js";
+import { assertNotLastAdmin } from "../../middlewares/mosque.middleware.js";
 import {
   Role,
   MembershipStatus,
@@ -18,6 +19,7 @@ import type {
   CreateMosqueInput,
   UpdateMosqueInput,
   GetMosqueMembersQuery,
+  UpdateMembershipInput,
 } from "./mosque.validation.js";
 
 export interface CreateMosqueResult {
@@ -101,6 +103,31 @@ export interface MosqueMemberItem {
     name: string;
     email: string;
   } | null;
+}
+
+export interface UpdatedMembershipResult {
+  id: string;
+  userId: string;
+  mosqueId: string;
+  role: Role;
+  status: MembershipStatus;
+  createdAt: Date;
+  updatedAt: Date;
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    phone: string | null;
+    status: UserStatus;
+    avatarUrl: string | null;
+  };
+}
+
+export interface DeleteMembershipResult {
+  id: string;
+  userId: string;
+  mosqueId: string;
+  role: Role;
 }
 
 /**
@@ -387,6 +414,28 @@ export async function getUserActiveMembership(
 }
 
 /**
+ * Reusable tenant resolver: Ensures mosque exists and is not soft-deleted.
+ * Resolves both CUID and slug to canonical CUID.
+ */
+async function resolveActiveMosqueId(mosqueId: string): Promise<string> {
+  const mosque = await prisma.mosque.findFirst({
+    where: {
+      OR: [
+        { id: mosqueId },
+        { slug: mosqueId },
+      ],
+    },
+    select: { id: true, isArchived: true },
+  });
+
+  if (!mosque || mosque.isArchived) {
+    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
+  }
+
+  return mosque.id;
+}
+
+/**
  * Lists all Memberships for a mosque with user details (name, email, phone, role, status).
  * Powers the administrator's people-management / members directory screen.
  *
@@ -404,24 +453,8 @@ export async function getMosqueMembers(
   mosqueId: string,
   options?: GetMosqueMembersQuery,
 ): Promise<MosqueMemberItem[]> {
-  // 1. Verify tenant exists and is not soft-deleted
-  const mosque = await prisma.mosque.findFirst({
-    where: {
-      OR: [
-        { id: mosqueId },
-        { slug: mosqueId },
-      ],
-    },
-    select: { id: true, isArchived: true },
-  });
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
 
-  if (!mosque || mosque.isArchived) {
-    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
-  }
-
-  const resolvedMosqueId = mosque.id;
-
-  // 2. Fetch memberships strictly scoped to resolved tenant ID
   const memberships = await prisma.membership.findMany({
     where: {
       mosqueId: resolvedMosqueId,
@@ -474,7 +507,6 @@ export async function getMosqueMembers(
     },
   });
 
-  // 3. Map into clean, safe DTO
   return memberships.map((m) => ({
     id: m.id,
     userId: m.userId,
@@ -499,6 +531,267 @@ export async function getMosqueMembers(
         }
       : null,
   }));
+}
+
+/**
+ * Updates a member's role or status within a mosque.
+ *
+ * Security & Business Logic Guarantees:
+ * 1. Tenant Boundary: Membership must belong strictly to `mosqueId`.
+ * 2. Last Admin Protection: Rejects demoting or suspending the mosque's only
+ *    active MOSQUE_ADMIN with error code `LAST_ADMIN_PROTECTED`.
+ * 3. Session Revocation: Invalidate user's sessionVersion upon role change or
+ *    suspension, forcing tokens to refresh and revoking stale privileges immediately.
+ * 4. Atomicity: Last-admin check, update, and session bump run in an atomic transaction.
+ *
+ * @param mosqueId - Target mosque ID or slug
+ * @param membershipId - Target membership CUID
+ * @param input - Validated update fields (role and/or status)
+ * @returns Updated membership record with user profile
+ */
+export async function updateMembership(
+  mosqueId: string,
+  membershipId: string,
+  input: UpdateMembershipInput,
+): Promise<UpdatedMembershipResult> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  const existingMembership = await prisma.membership.findFirst({
+    where: {
+      id: membershipId,
+      mosqueId: resolvedMosqueId,
+    },
+    select: {
+      id: true,
+      userId: true,
+      mosqueId: true,
+      role: true,
+      status: true,
+    },
+  });
+
+  if (!existingMembership) {
+    throw HttpError.notFound(
+      "Membership not found in this mosque.",
+      "MEMBERSHIP_NOT_FOUND",
+    );
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    const isCurrentActiveAdmin =
+      existingMembership.role === Role.MOSQUE_ADMIN &&
+      existingMembership.status === MembershipStatus.ACTIVE;
+
+    const wouldDemoteRole =
+      input.role !== undefined && input.role !== Role.MOSQUE_ADMIN;
+    const wouldDeactivateStatus =
+      input.status !== undefined && input.status !== MembershipStatus.ACTIVE;
+
+    if (isCurrentActiveAdmin && (wouldDemoteRole || wouldDeactivateStatus)) {
+      await assertNotLastAdmin(resolvedMosqueId, existingMembership.userId, tx);
+    }
+
+    const updated = await tx.membership.update({
+      where: { id: existingMembership.id },
+      data: {
+        ...(input.role !== undefined ? { role: input.role } : {}),
+        ...(input.status !== undefined ? { status: input.status } : {}),
+      },
+      select: {
+        id: true,
+        userId: true,
+        mosqueId: true,
+        role: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+            status: true,
+            profile: {
+              select: {
+                avatarUrl: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const roleChanged = input.role !== undefined && input.role !== existingMembership.role;
+    const statusChanged = input.status !== undefined && input.status !== existingMembership.status;
+
+    if (roleChanged || statusChanged) {
+      await tx.user.update({
+        where: { id: existingMembership.userId },
+        data: {
+          sessionVersion: { increment: 1 },
+        },
+      });
+    }
+
+    return updated;
+  });
+
+  return {
+    id: result.id,
+    userId: result.userId,
+    mosqueId: result.mosqueId,
+    role: result.role,
+    status: result.status,
+    createdAt: result.createdAt,
+    updatedAt: result.updatedAt,
+    user: {
+      id: result.user.id,
+      name: result.user.name,
+      email: result.user.email,
+      phone: result.user.phone,
+      status: result.user.status,
+      avatarUrl: result.user.profile?.avatarUrl ?? null,
+    },
+  };
+}
+
+/**
+ * Shared internal helper: Deletes a membership row with safety rails.
+ *
+ * Safety rails enforced:
+ * 1. Last Admin Protection: Rejects removing the mosque's only active MOSQUE_ADMIN
+ *    with error code LAST_ADMIN_PROTECTED.
+ * 2. Atomic Session Revocation: Increments user's sessionVersion so any outstanding
+ *    JWT tokens or cached claims for this mosque are immediately revoked.
+ * 3. Atomicity: Last-admin check, row deletion, and session bump run in one transaction.
+ */
+async function deleteMembershipWithGuards(
+  resolvedMosqueId: string,
+  targetMembership: {
+    id: string;
+    userId: string;
+    role: Role;
+    status: MembershipStatus;
+  },
+): Promise<DeleteMembershipResult> {
+  const result = await prisma.$transaction(async (tx) => {
+    // 1. Guard against removing the last active MOSQUE_ADMIN
+    if (
+      targetMembership.role === Role.MOSQUE_ADMIN &&
+      targetMembership.status === MembershipStatus.ACTIVE
+    ) {
+      await assertNotLastAdmin(resolvedMosqueId, targetMembership.userId, tx);
+    }
+
+    // 2. Delete the Membership row
+    await tx.membership.delete({
+      where: { id: targetMembership.id },
+    });
+
+    // 3. Invalidate user's sessions to revoke cached tenant roles immediately
+    await tx.user.update({
+      where: { id: targetMembership.userId },
+      data: {
+        sessionVersion: { increment: 1 },
+      },
+    });
+
+    return {
+      id: targetMembership.id,
+      userId: targetMembership.userId,
+      mosqueId: resolvedMosqueId,
+      role: targetMembership.role,
+    };
+  });
+
+  return result;
+}
+
+/**
+ * Removes a member from the mosque (deletes the Membership row).
+ * Accessible by MOSQUE_ADMIN.
+ *
+ * Safety rails enforced:
+ * - Scoped strictly to target mosqueId.
+ * - Rejects with LAST_ADMIN_PROTECTED if removing the last active MOSQUE_ADMIN.
+ * - Invalidation: Bumps user's sessionVersion immediately.
+ *
+ * @param mosqueId - Target mosque identifier (ID or slug)
+ * @param membershipId - Target membership CUID to remove
+ * @returns Summary of deleted membership
+ */
+export async function removeMember(
+  mosqueId: string,
+  membershipId: string,
+): Promise<DeleteMembershipResult> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  // Fetch target membership ensuring it belongs strictly to this mosque
+  const targetMembership = await prisma.membership.findFirst({
+    where: {
+      id: membershipId,
+      mosqueId: resolvedMosqueId,
+    },
+    select: {
+      id: true,
+      userId: true,
+      role: true,
+      status: true,
+    },
+  });
+
+  if (!targetMembership) {
+    throw HttpError.notFound(
+      "Membership not found in this mosque.",
+      "MEMBERSHIP_NOT_FOUND",
+    );
+  }
+
+  return deleteMembershipWithGuards(resolvedMosqueId, targetMembership);
+}
+
+/**
+ * Lets a member voluntarily leave a mosque (deletes caller's own Membership row).
+ * Accessible by any authenticated member of the mosque.
+ *
+ * Safety rails enforced:
+ * - A lone MOSQUE_ADMIN cannot abandon the mosque without transferring the admin role first.
+ * - Rejects with LAST_ADMIN_PROTECTED.
+ * - Invalidation: Bumps user's sessionVersion immediately.
+ *
+ * @param mosqueId - Target mosque identifier (ID or slug)
+ * @param userId - Caller's authenticated user ID
+ * @returns Summary of deleted membership
+ */
+export async function leaveMosque(
+  mosqueId: string,
+  userId: string,
+): Promise<DeleteMembershipResult> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  // Fetch caller's membership in this mosque
+  const callerMembership = await prisma.membership.findFirst({
+    where: {
+      userId,
+      mosqueId: resolvedMosqueId,
+    },
+    select: {
+      id: true,
+      userId: true,
+      role: true,
+      status: true,
+    },
+  });
+
+  if (!callerMembership) {
+    throw HttpError.notFound(
+      "You do not hold a membership in this mosque.",
+      "MEMBERSHIP_NOT_FOUND",
+    );
+  }
+
+  return deleteMembershipWithGuards(resolvedMosqueId, callerMembership);
 }
 
 /**

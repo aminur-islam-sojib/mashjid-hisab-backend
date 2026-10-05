@@ -8,7 +8,6 @@ import { sendResponse } from "../../utils/sendResponse.js";
 import {
   validateCreateMosqueInput,
   validateGetUserMosquesQuery,
-  validateGetMosqueMembersQuery,
   validateMosqueIdParam,
   validateMosqueSlugParam,
   validateUpdateMosqueInput,
@@ -92,26 +91,12 @@ export const getMosqueSettingsHandler = catchAsync(
   },
 );
 
-/**
- * GET /api/mosques/:mosqueId/members
- * Access: Authenticated + MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER
- *
- * Lists all Memberships for the mosque with user name/role/status — the admin's people-management screen.
- */
-export const getMosqueMembersHandler = catchAsync(
-  async (req: Request, res: Response): Promise<void> => {
-    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
-    const query = validateGetMosqueMembersQuery(req.query);
-
-    const members = await getMosqueMembers(mosqueId, query);
-
-    sendResponse(res, {
-      statusCode: 200,
-      message: "Mosque members retrieved successfully.",
-      data: members,
-    });
-  },
-);
+export {
+  getMosqueMembersHandler,
+  updateMembershipHandler,
+  leaveMosqueHandler,
+  removeMemberHandler,
+} from "../membership/membership.controller.js";
 
 /**
  * PATCH /api/mosques/:mosqueId
