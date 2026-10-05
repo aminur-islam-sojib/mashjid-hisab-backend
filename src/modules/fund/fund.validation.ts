@@ -214,3 +214,131 @@ export function validateGetMosqueFundsQuery(query: unknown): GetMosqueFundsQuery
 
   return result;
 }
+
+/**
+ * Validates route parameter :fundId
+ */
+export function validateFundIdParam(param: unknown): string {
+  if (typeof param !== "string" || !param.trim()) {
+    throw HttpError.badRequest("Fund identifier is required.", "INVALID_FUND_ID");
+  }
+  return param.trim();
+}
+
+export interface UpdateFundInput {
+  name?: string;
+  description?: string | null;
+  isRestricted?: boolean;
+  confirmPolicyChange?: boolean;
+  confirmRestrictionChange?: boolean;
+  confirm?: boolean;
+}
+
+/**
+ * Validates request payload for PATCH /api/mosques/:mosqueId/funds/:fundId
+ *
+ * Rules:
+ * - At least one field must be provided (name, description, isRestricted).
+ * - name: optional string, 2-100 chars after trimming.
+ * - description: optional string (max 500 chars) or null to clear.
+ * - isRestricted: optional boolean.
+ * - confirmPolicyChange / confirmRestrictionChange: optional boolean.
+ */
+export function validateUpdateFundInput(body: unknown): UpdateFundInput {
+  if (!body || typeof body !== "object") {
+    throw HttpError.badRequest("Request body must be a JSON object.");
+  }
+
+  const raw = body as Record<string, unknown>;
+  const issues: ValidationIssue[] = [];
+  const input: UpdateFundInput = {};
+  let hasUpdateFields = false;
+
+  // -- name (optional) -------------------------------------------------------
+  if (raw["name"] !== undefined) {
+    hasUpdateFields = true;
+    if (typeof raw["name"] !== "string" || !raw["name"].trim()) {
+      issues.push({ field: "name", issue: "Fund name cannot be empty." });
+    } else {
+      const trimmedName = raw["name"].trim();
+      if (trimmedName.length < 2) {
+        issues.push({
+          field: "name",
+          issue: "Fund name must be at least 2 characters long.",
+        });
+      } else if (trimmedName.length > 100) {
+        issues.push({
+          field: "name",
+          issue: "Fund name cannot exceed 100 characters.",
+        });
+      } else {
+        input.name = trimmedName;
+      }
+    }
+  }
+
+  // -- description (optional) ------------------------------------------------
+  if (raw["description"] !== undefined) {
+    hasUpdateFields = true;
+    if (raw["description"] === null || raw["description"] === "") {
+      input.description = null;
+    } else if (typeof raw["description"] !== "string") {
+      issues.push({ field: "description", issue: "Description must be a string or null." });
+    } else {
+      const trimmedDesc = raw["description"].trim();
+      if (trimmedDesc.length > 500) {
+        issues.push({
+          field: "description",
+          issue: "Description cannot exceed 500 characters.",
+        });
+      } else {
+        input.description = trimmedDesc || null;
+      }
+    }
+  }
+
+  // -- isRestricted (optional) -----------------------------------------------
+  if (raw["isRestricted"] !== undefined && raw["isRestricted"] !== null) {
+    hasUpdateFields = true;
+    if (typeof raw["isRestricted"] === "boolean") {
+      input.isRestricted = raw["isRestricted"];
+    } else if (raw["isRestricted"] === "true") {
+      input.isRestricted = true;
+    } else if (raw["isRestricted"] === "false") {
+      input.isRestricted = false;
+    } else {
+      issues.push({
+        field: "isRestricted",
+        issue: "isRestricted must be a boolean (true or false).",
+      });
+    }
+  }
+
+  // -- confirmation flags (optional) -----------------------------------------
+  if (
+    raw["confirmPolicyChange"] !== undefined ||
+    raw["confirmRestrictionChange"] !== undefined ||
+    raw["confirm"] !== undefined
+  ) {
+    const confirmVal =
+      raw["confirmPolicyChange"] ??
+      raw["confirmRestrictionChange"] ??
+      raw["confirm"];
+    input.confirmPolicyChange = Boolean(confirmVal);
+    input.confirmRestrictionChange = Boolean(confirmVal);
+    input.confirm = Boolean(confirmVal);
+  }
+
+  if (issues.length > 0) {
+    throw HttpError.validationError(issues);
+  }
+
+  if (!hasUpdateFields) {
+    throw HttpError.badRequest(
+      "At least one field must be provided to update (name, description, or isRestricted).",
+      "EMPTY_UPDATE_PAYLOAD",
+    );
+  }
+
+  return input;
+}

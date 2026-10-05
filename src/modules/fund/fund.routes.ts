@@ -12,6 +12,8 @@ import { Role } from "../../../generated/prisma/client.js";
 import {
   createFundHandler,
   getMosqueFundsHandler,
+  getFundByIdHandler,
+  updateFundHandler,
 } from "./fund.controller.js";
 
 const fundRouter: Router = Router({ mergeParams: true });
@@ -41,6 +43,34 @@ fundRouter.get(
   authenticate,
   requireMosqueMembership(...OVERSIGHT_ROLES),
   getMosqueFundsHandler,
+);
+
+/**
+ * GET /api/mosques/:mosqueId/funds/:fundId
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER
+ *
+ * Retrieves a single Fund by its ID.
+ */
+fundRouter.get(
+  "/:fundId",
+  authenticate,
+  requireMosqueMembership(...OVERSIGHT_ROLES),
+  getFundByIdHandler,
+);
+
+/**
+ * PATCH /api/mosques/:mosqueId/funds/:fundId
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Updates name/description/isRestricted.
+ * Flipping isRestricted on a Fund that already has transactions is a real policy change
+ * requiring explicit confirmation ('confirmPolicyChange: true').
+ */
+fundRouter.patch(
+  "/:fundId",
+  authenticate,
+  requireMosqueMembership(Role.MOSQUE_ADMIN),
+  updateFundHandler,
 );
 
 export default fundRouter;

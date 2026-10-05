@@ -9,10 +9,14 @@ import { validateMosqueIdParam } from "../mosque/mosque.validation.js";
 import {
   validateCreateFundInput,
   validateGetMosqueFundsQuery,
+  validateFundIdParam,
+  validateUpdateFundInput,
 } from "./fund.validation.js";
 import {
   createFund,
   getMosqueFunds,
+  getFundById,
+  updateFund,
 } from "./fund.service.js";
 
 /**
@@ -56,3 +60,48 @@ export const getMosqueFundsHandler = catchAsync(
     });
   },
 );
+
+/**
+ * GET /api/mosques/:mosqueId/funds/:fundId
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER
+ *
+ * Retrieves a single Fund by its ID.
+ */
+export const getFundByIdHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const fundId = validateFundIdParam(req.params["fundId"]);
+
+    const fund = await getFundById(mosqueId, fundId);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Fund retrieved successfully.",
+      data: fund,
+    });
+  },
+);
+
+/**
+ * PATCH /api/mosques/:mosqueId/funds/:fundId
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Updates name/description/isRestricted.
+ * Flipping isRestricted on a Fund that already has transactions requires explicit confirmation.
+ */
+export const updateFundHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const fundId = validateFundIdParam(req.params["fundId"]);
+    const input = validateUpdateFundInput(req.body);
+
+    const fund = await updateFund(mosqueId, fundId, input);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Fund updated successfully.",
+      data: fund,
+    });
+  },
+);
+
