@@ -322,6 +322,7 @@ export async function registerUser(
     mosqueId: activeMembership?.mosqueId ?? null,
     role: activeMembership?.role ?? null,
     sessionVersion: createdUser.sessionVersion,
+    mustChangePassword: createdUser.mustChangePassword,
   });
 
   return {
@@ -448,6 +449,7 @@ export async function loginUser(
     mosqueId: activeMembership?.mosqueId ?? null,
     role: effectiveRole,
     sessionVersion: user.sessionVersion,
+    mustChangePassword: user.mustChangePassword,
   });
 
   // -------------------------------------------------------------------------
@@ -514,6 +516,7 @@ export async function refreshAccessToken(
           id: true,
           status: true,
           sessionVersion: true,
+          mustChangePassword: true,
         },
       },
     },
@@ -564,6 +567,7 @@ export async function refreshAccessToken(
     mosqueId: storedToken.mosqueId,
     role: storedToken.role,
     sessionVersion: storedToken.user.sessionVersion,
+    mustChangePassword: storedToken.user.mustChangePassword,
   });
 
   return {
@@ -778,6 +782,7 @@ export async function resetPassword(
       where: { id: resetRecord.userId },
       data: {
         passwordHash,
+        mustChangePassword: false,
         sessionVersion: { increment: 1 },
       },
     });
@@ -989,6 +994,7 @@ export async function changePassword(
     mosqueId: activeMembership?.mosqueId ?? null,
     role: effectiveRole,
     sessionVersion: updatedUser.sessionVersion,
+    mustChangePassword: updatedUser.mustChangePassword,
   });
 
   return {

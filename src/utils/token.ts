@@ -25,7 +25,12 @@ export interface AccessTokenPayload {
   mosqueId: string | null;
   role: Role | null;
   sessionVersion: number;
+  mustChangePassword: boolean;
 }
+
+export type SignAccessTokenInput = Omit<AccessTokenPayload, "mustChangePassword"> & {
+  mustChangePassword?: boolean;
+};
 
 export interface RefreshTokenPayload {
   sub: string;           // userId
@@ -39,14 +44,22 @@ export interface RefreshTokenPayload {
 // Access token
 // ---------------------------------------------------------------------------
 
-export function signAccessToken(payload: AccessTokenPayload): string {
-  return jwt.sign(payload, config.JWT_ACCESS_SECRET, {
+export function signAccessToken(payload: SignAccessTokenInput): string {
+  const tokenPayload: AccessTokenPayload = {
+    ...payload,
+    mustChangePassword: payload.mustChangePassword ?? false,
+  };
+  return jwt.sign(tokenPayload, config.JWT_ACCESS_SECRET, {
     expiresIn: config.JWT_ACCESS_EXPIRES_IN as jwt.SignOptions["expiresIn"],
   });
 }
 
 export function verifyAccessToken(token: string): AccessTokenPayload {
-  return jwt.verify(token, config.JWT_ACCESS_SECRET) as AccessTokenPayload;
+  const payload = jwt.verify(token, config.JWT_ACCESS_SECRET) as AccessTokenPayload;
+  return {
+    ...payload,
+    mustChangePassword: Boolean(payload.mustChangePassword),
+  };
 }
 
 // ---------------------------------------------------------------------------

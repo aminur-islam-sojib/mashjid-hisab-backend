@@ -153,6 +153,7 @@ export const joinMosqueByInviteLinkHandler = catchAsync(
         membership: result.membership,
         user: result.user,
         isNewUser: result.isNewUser,
+        ...(result.temporaryPassword ? { temporaryPassword: result.temporaryPassword } : {}),
         ...(result.accessToken ? { accessToken: result.accessToken } : {}),
       },
     });

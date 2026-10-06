@@ -250,6 +250,24 @@ export function validateJoinInviteLinkInput(body: unknown): JoinInviteLinkInput 
       if (password.length < 8) {
         issues.push({ field: "password", issue: "Must be at least 8 characters." });
       } else {
+        if (!/[A-Z]/.test(password)) {
+          issues.push({
+            field: "password",
+            issue: "Must contain at least one uppercase letter.",
+          });
+        }
+        if (!/[a-z]/.test(password)) {
+          issues.push({
+            field: "password",
+            issue: "Must contain at least one lowercase letter.",
+          });
+        }
+        if (!/[0-9]/.test(password)) {
+          issues.push({
+            field: "password",
+            issue: "Must contain at least one digit.",
+          });
+        }
         input.password = password;
       }
     }

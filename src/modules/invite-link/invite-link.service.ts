@@ -367,8 +367,10 @@ export interface JoinMosqueInviteLinkResult {
     name: string;
     email: string | null;
     phone: string | null;
+    mustChangePassword: boolean;
   };
   isNewUser: boolean;
+  temporaryPassword?: string | null;
   accessToken?: string;
   refreshToken?: string;
 }
@@ -441,11 +443,18 @@ export async function joinMosqueByInviteLink(
 
   // 2. Prepare password hash for new user registration (CPU-intensive, keep outside tx)
   let preparedPasswordHash: string | null = null;
+  let generatedTemporaryPassword: string | null = null;
+  let mustChangePassword = false;
+
   if (!preExistingUser) {
-    const rawPassword = input.password?.trim()
-      ? input.password
-      : generateSecureTemporaryPassword(12);
-    preparedPasswordHash = await bcrypt.hash(rawPassword, config.BCRYPT_ROUNDS);
+    if (input.password?.trim()) {
+      preparedPasswordHash = await bcrypt.hash(input.password, config.BCRYPT_ROUNDS);
+      mustChangePassword = false;
+    } else {
+      generatedTemporaryPassword = generateSecureTemporaryPassword(12);
+      preparedPasswordHash = await bcrypt.hash(generatedTemporaryPassword, config.BCRYPT_ROUNDS);
+      mustChangePassword = true;
+    }
   }
 
   // 3. Atomic Database Transaction
@@ -480,6 +489,7 @@ export async function joinMosqueByInviteLink(
       phone: string | null;
       sessionVersion: number;
       passwordHash: string;
+      mustChangePassword: boolean;
     };
     let isNewUser = false;
 
@@ -527,6 +537,7 @@ export async function joinMosqueByInviteLink(
           passwordHash: preparedPasswordHash!,
           status: UserStatus.ACTIVE,
           emailVerified: false,
+          mustChangePassword,
           sessionVersion: 1,
           locale: input.locale ?? "bn",
           profile: {
@@ -611,6 +622,7 @@ export async function joinMosqueByInviteLink(
         mosqueId: membership.mosqueId,
         role: membership.role,
         sessionVersion: targetUser.sessionVersion,
+        mustChangePassword: targetUser.mustChangePassword,
       });
 
       const rawRefreshJwt = signRefreshToken({
@@ -653,8 +665,10 @@ export async function joinMosqueByInviteLink(
         name: targetUser.name,
         email: targetUser.email,
         phone: targetUser.phone,
+        mustChangePassword: targetUser.mustChangePassword,
       },
       isNewUser,
+      temporaryPassword: isNewUser && mustChangePassword ? generatedTemporaryPassword : null,
       accessToken,
       refreshToken,
     };

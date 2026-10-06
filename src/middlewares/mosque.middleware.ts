@@ -133,7 +133,7 @@ export function requireMosqueMembership(
         },
         include: {
           user: {
-            select: { status: true },
+            select: { status: true, mustChangePassword: true },
           },
           mosque: {
             select: {
@@ -166,6 +166,14 @@ export function requireMosqueMembership(
         throw HttpError.forbidden(
           "Access denied. Your user account is inactive or blocked.",
           "ACCOUNT_INACTIVE",
+        );
+      }
+
+      // 4d. Enforce temporary password change restriction
+      if (membership.user.mustChangePassword) {
+        throw HttpError.forbidden(
+          "Password change required. You must change your temporary password before accessing mosque resources.",
+          "MUST_CHANGE_PASSWORD",
         );
       }
 

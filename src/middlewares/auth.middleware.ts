@@ -94,9 +94,48 @@ export function extractAccessToken(req: Request): string | null {
 }
 
 /**
+ * Endpoints that an authenticated user is permitted to call even when
+ * their account requires an immediate password change (mustChangePassword === true).
+ *
+ * Requirements:
+ *  • /auth/change-password (PATCH) — to set permanent password and clear the flag.
+ *  • /auth/me (GET)               — to read user profile & mustChangePassword flag.
+ *  • /auth/logout (POST)          — to revoke session and log out.
+ */
+export function isAllowedWhenPasswordChangeRequired(req: Request): boolean {
+  const urlPath = (req.originalUrl || req.url || "").split("?")[0]!.toLowerCase().replace(/\/+$/, "");
+  const routePath = `${req.baseUrl || ""}${req.path || ""}`.split("?")[0]!.toLowerCase().replace(/\/+$/, "");
+
+  const isChangePassword =
+    urlPath === "/api/auth/change-password" ||
+    urlPath === "/auth/change-password" ||
+    routePath === "/api/auth/change-password" ||
+    routePath === "/auth/change-password";
+
+  const isGetMe =
+    urlPath === "/api/auth/me" ||
+    urlPath === "/auth/me" ||
+    routePath === "/api/auth/me" ||
+    routePath === "/auth/me";
+
+  const isLogout =
+    urlPath === "/api/auth/logout" ||
+    urlPath === "/auth/logout" ||
+    routePath === "/api/auth/logout" ||
+    routePath === "/auth/logout";
+
+  if (isChangePassword && req.method === "PATCH") return true;
+  if (isGetMe && req.method === "GET") return true;
+  if (isLogout && req.method === "POST") return true;
+
+  return false;
+}
+
+/**
  * Strict authentication middleware.
  * Verifies access token from headers, cookies, or query parameters.
  * Populates `req.user` with AccessTokenPayload.
+ * Enforces mandatory password change restriction when mustChangePassword === true.
  */
 export function authenticate(
   req: Request,
@@ -112,10 +151,9 @@ export function authenticate(
     );
   }
 
+  let payload: AccessTokenPayload;
   try {
-    const payload = verifyAccessToken(token);
-    req.user = payload;
-    next();
+    payload = verifyAccessToken(token);
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {
       throw HttpError.unauthorized(
@@ -134,6 +172,18 @@ export function authenticate(
       "AUTH_UNAUTHORIZED",
     );
   }
+
+  req.user = payload;
+
+  // Enforce temporary password change restriction
+  if (payload.mustChangePassword && !isAllowedWhenPasswordChangeRequired(req)) {
+    throw HttpError.forbidden(
+      "Password change required. You must change your temporary password before accessing other resources.",
+      "MUST_CHANGE_PASSWORD",
+    );
+  }
+
+  next();
 }
 
 /**
