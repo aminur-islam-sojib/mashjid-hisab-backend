@@ -6,6 +6,10 @@ import { prisma } from "../../lib/prisma.js";
 import { HttpError } from "../../errors/HttpError.js";
 import {
   AccountType,
+  DonationStatus,
+  ExpenseStatus,
+  TransferLeg,
+  TransferStatus,
   Prisma,
   type PrismaClient,
 } from "../../../generated/prisma/client.js";
@@ -490,61 +494,58 @@ export async function getAccountBalance(
   }
 
   try {
-    const matchingTables = await client.$queryRaw<Array<{ table_name: string }>>`
-      SELECT table_name 
-      FROM information_schema.tables 
-      WHERE table_schema = 'public' 
-        AND table_name IN ('transactions', 'ledger_entries', 'journal_lines', 'account_balances')
-    `;
-
-    if (!matchingTables || matchingTables.length === 0) {
-      return netBalance;
-    }
-
-    for (const row of matchingTables) {
-      const tableName = row.table_name;
-      const columnRows = await client.$queryRaw<Array<{ column_name: string }>>`
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_schema = 'public'
-          AND table_name = ${tableName}
-          AND column_name IN ('accountId', 'amount', 'balance', 'debit', 'credit')
-      `;
-
-      const columnNames = new Set(columnRows.map((c) => c.column_name));
-      if (!columnNames.has("accountId")) {
-        continue;
-      }
-
-      if (columnNames.has("balance")) {
-        const balResult = await client.$queryRawUnsafe<Array<{ total_balance: string | null }>>(
-          `SELECT COALESCE(SUM("balance"), 0)::text AS total_balance FROM "${tableName}" WHERE "accountId" = $1`,
+    const [donations, expenses, transferInflows, transferOutflows] = await Promise.all([
+      client.donation.aggregate({
+        where: {
           accountId,
-        );
-        if (balResult && balResult[0]?.total_balance) {
-          netBalance += BigInt(balResult[0].total_balance);
-        }
-      } else if (columnNames.has("debit") && columnNames.has("credit")) {
-        // In asset accounts (Cash, Bank, Mobile Wallet): debit increases the account balance, credit decreases it.
-        const dcResult = await client.$queryRawUnsafe<Array<{ total_net: string | null }>>(
-          `SELECT COALESCE(SUM("debit" - "credit"), 0)::text AS total_net FROM "${tableName}" WHERE "accountId" = $1`,
+          OR: [
+            { status: DonationStatus.POSTED },
+            { status: DonationStatus.VOIDED, reversalEntry: { isNot: null } },
+          ],
+        },
+        _sum: { amount: true },
+      }),
+      client.expense.aggregate({
+        where: {
           accountId,
-        );
-        if (dcResult && dcResult[0]?.total_net) {
-          netBalance += BigInt(dcResult[0].total_net);
-        }
-      } else if (columnNames.has("amount")) {
-        const amtResult = await client.$queryRawUnsafe<Array<{ total_amount: string | null }>>(
-          `SELECT COALESCE(SUM("amount"), 0)::text AS total_amount FROM "${tableName}" WHERE "accountId" = $1`,
+          OR: [
+            { status: ExpenseStatus.POSTED },
+            { status: ExpenseStatus.VOIDED, reversalEntry: { isNot: null } },
+          ],
+        },
+        _sum: { amount: true },
+      }),
+      client.transfer.aggregate({
+        where: {
           accountId,
-        );
-        if (amtResult && amtResult[0]?.total_amount) {
-          netBalance += BigInt(amtResult[0].total_amount);
-        }
-      }
-    }
+          leg: TransferLeg.TO,
+          OR: [
+            { status: TransferStatus.POSTED },
+            { status: TransferStatus.VOIDED, reversalEntry: { isNot: null } },
+          ],
+        },
+        _sum: { amount: true },
+      }),
+      client.transfer.aggregate({
+        where: {
+          accountId,
+          leg: TransferLeg.FROM,
+          OR: [
+            { status: TransferStatus.POSTED },
+            { status: TransferStatus.VOIDED, reversalEntry: { isNot: null } },
+          ],
+        },
+        _sum: { amount: true },
+      }),
+    ]);
 
-    return netBalance;
+    return (
+      netBalance +
+      (donations._sum.amount ?? 0n) -
+      (expenses._sum.amount ?? 0n) +
+      (transferInflows._sum.amount ?? 0n) -
+      (transferOutflows._sum.amount ?? 0n)
+    );
   } catch {
     return netBalance;
   }

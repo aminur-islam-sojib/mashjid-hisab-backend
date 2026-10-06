@@ -49,6 +49,7 @@ model Mosque {
   inviteLinks MosqueInviteLink[]
   donations   Donation[]
   expenses    Expense[]
+  transfers   Transfer[]
 
   @@map("mosques")
 }

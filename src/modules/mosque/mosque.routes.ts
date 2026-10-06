@@ -14,6 +14,7 @@ import familyRouter from "../family/family.routes.js";
 import inviteLinkRouter from "../invite-link/invite-link.routes.js";
 import donationRouter from "../donation/donation.routes.js";
 import expenseRouter from "../expense/expense.routes.js";
+import transferRouter from "../transfer/transfer.routes.js";
 import {
   createMosqueHandler,
   getUserMosquesHandler,
@@ -81,6 +82,12 @@ mosqueRouter.use("/:mosqueId/donations", donationRouter);
  * Delegated to Expense Router (disbursements, approvals, etc.)
  */
 mosqueRouter.use("/:mosqueId/expenses", expenseRouter);
+
+/**
+ * /api/mosques/:mosqueId/transfers
+ * Delegated to Transfer Router (account & fund transfers)
+ */
+mosqueRouter.use("/:mosqueId/transfers", transferRouter);
 
 /**
  * GET /api/mosques/:mosqueId

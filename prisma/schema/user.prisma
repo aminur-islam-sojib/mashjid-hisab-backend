@@ -59,6 +59,8 @@ model User {
   postedExpenses          Expense[]             @relation("ExpensePoster")
   approvedExpenses        Expense[]             @relation("ExpenseApprover")
   voidedExpenses          Expense[]             @relation("ExpenseVoider")
+  createdTransfers        Transfer[]            @relation("TransferCreator")
+  voidedTransfers         Transfer[]            @relation("TransferVoider")
 
   @@map("users")
 }

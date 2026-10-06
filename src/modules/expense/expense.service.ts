@@ -8,6 +8,8 @@ import {
   Role,
   ExpenseStatus,
   DonationStatus,
+  TransferLeg,
+  TransferStatus,
   CategoryType,
   AccountType,
   FundType,
@@ -163,7 +165,8 @@ export const EXPENSE_DEFAULT_INCLUDE = {
 
 /**
  * Calculates current available balance in a physical Account.
- * Balance = openingBalance + total POSTED donations - total POSTED expenses.
+ * Balance = openingBalance + total POSTED donations - total POSTED expenses
+ *           + total POSTED transfer inflows - total POSTED transfer outflows.
  */
 export async function getAccountBalance(
   tx: Prisma.TransactionClient,
@@ -197,16 +200,43 @@ export async function getAccountBalance(
     _sum: { amount: true },
   });
 
+  const transferInflows = await tx.transfer.aggregate({
+    where: {
+      accountId,
+      leg: TransferLeg.TO,
+      OR: [
+        { status: TransferStatus.POSTED },
+        { status: TransferStatus.VOIDED, reversalEntry: { isNot: null } },
+      ],
+    },
+    _sum: { amount: true },
+  });
+
+  const transferOutflows = await tx.transfer.aggregate({
+    where: {
+      accountId,
+      leg: TransferLeg.FROM,
+      OR: [
+        { status: TransferStatus.POSTED },
+        { status: TransferStatus.VOIDED, reversalEntry: { isNot: null } },
+      ],
+    },
+    _sum: { amount: true },
+  });
+
   return (
     account.openingBalance +
     (donations._sum.amount ?? 0n) -
-    (expenses._sum.amount ?? 0n)
+    (expenses._sum.amount ?? 0n) +
+    (transferInflows._sum.amount ?? 0n) -
+    (transferOutflows._sum.amount ?? 0n)
   );
 }
 
 /**
  * Calculates current available balance in an accounting Fund.
- * Balance = total POSTED donations - total POSTED expenses.
+ * Balance = total POSTED donations - total POSTED expenses
+ *           + total POSTED transfer inflows - total POSTED transfer outflows.
  */
 export async function getFundBalance(
   tx: Prisma.TransactionClient,
@@ -234,9 +264,35 @@ export async function getFundBalance(
     _sum: { amount: true },
   });
 
+  const transferInflows = await tx.transfer.aggregate({
+    where: {
+      fundId,
+      leg: TransferLeg.TO,
+      OR: [
+        { status: TransferStatus.POSTED },
+        { status: TransferStatus.VOIDED, reversalEntry: { isNot: null } },
+      ],
+    },
+    _sum: { amount: true },
+  });
+
+  const transferOutflows = await tx.transfer.aggregate({
+    where: {
+      fundId,
+      leg: TransferLeg.FROM,
+      OR: [
+        { status: TransferStatus.POSTED },
+        { status: TransferStatus.VOIDED, reversalEntry: { isNot: null } },
+      ],
+    },
+    _sum: { amount: true },
+  });
+
   return (
     (donations._sum.amount ?? 0n) -
-    (expenses._sum.amount ?? 0n)
+    (expenses._sum.amount ?? 0n) +
+    (transferInflows._sum.amount ?? 0n) -
+    (transferOutflows._sum.amount ?? 0n)
   );
 }
 

@@ -134,3 +134,21 @@ enum ExpenseStatus {
   VOIDED            // Voided with reversal entry
 }
 
+// ---------------------------------------------------------------------------
+// TransferLeg
+// Direction of the ledger entry within a transfer operation.
+// ---------------------------------------------------------------------------
+enum TransferLeg {
+  FROM // Source / outflow leg
+  TO   // Destination / inflow leg
+}
+
+// ---------------------------------------------------------------------------
+// TransferStatus
+// Lifecycle of a transfer entry.
+// ---------------------------------------------------------------------------
+enum TransferStatus {
+  POSTED // Active and posted to the ledger
+  VOIDED // Reversal created and original voided
+}
+

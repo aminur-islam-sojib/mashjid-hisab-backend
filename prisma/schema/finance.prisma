@@ -32,6 +32,7 @@ model Fund {
   categories   Category[]
   donations    Donation[]
   expenses     Expense[]
+  transfers    Transfer[]
 
   @@unique([mosqueId, name])
   @@index([mosqueId])
@@ -59,6 +60,7 @@ model Account {
 
   donations      Donation[]
   expenses       Expense[]
+  transfers      Transfer[]
 
   @@unique([mosqueId, name])
   @@index([mosqueId])

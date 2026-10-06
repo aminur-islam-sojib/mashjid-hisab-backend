@@ -1,0 +1,92 @@
+// =============================================================================
+// transfer.prisma — Domain E: Mosque Account & Fund Transfers
+//
+// Design notes:
+//  • Records money transfers between accounts within one fund (e.g. Cash to Bank),
+//    or inter-fund transfers (fund-to-fund).
+//  • Every transfer operation creates two linked entries (legs) atomically:
+//      - FROM leg: outflow from source account and source fund.
+//      - TO leg: inflow to destination account and destination fund.
+//  • Both legs share the same transferNumber (e.g. TRF-YYYY-XXXXX) and reference
+//    each other via linkedTransferId.
+//  • Fund-to-fund transfers:
+//      - Require Role.MOSQUE_ADMIN (blocked for TREASURER).
+//      - Require an explicit reason.
+//      - Are strictly blocked out of restricted funds (e.g. Zakat, Waqf).
+//  • Voiding:
+//      - Allowed only for Role.MOSQUE_ADMIN.
+//      - Requires a reason.
+//      - Reverses both legs together atomically and restores account & fund balances.
+// =============================================================================
+
+model Transfer {
+  id                 String         @id @default(cuid())
+  mosqueId           String
+  mosque             Mosque         @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  // Shared transfer identifier across paired legs, e.g. "TRF-2026-00001"
+  transferNumber     String
+
+  // Leg direction: FROM (source outflow) or TO (destination inflow)
+  leg                TransferLeg
+
+  // Monetary value in minor units (poisha), strictly positive BigInt
+  // Note: reversal entries carry negative amount, preserving double-entry sum
+  amount             BigInt
+
+  // Physical Account linkage
+  accountId          String
+  account            Account        @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  // Financial Fund linkage
+  fundId             String
+  fund               Fund           @relation(fields: [fundId], references: [id], onDelete: Restrict)
+
+  // Financial date of the transfer
+  date               DateTime
+
+  // Posting & void lifecycle
+  status             TransferStatus @default(POSTED)
+
+  // True if transfer is between two different funds
+  isFundTransfer     Boolean        @default(false)
+
+  // Justification / reason (mandatory for fund-to-fund transfers)
+  reason             String?
+
+  // Operational notes / comments
+  notes              String?
+
+  // Linkage to the counterpart leg of the transfer pair
+  linkedTransferId   String?
+  linkedTransfer     Transfer?      @relation("TransferPair", fields: [linkedTransferId], references: [id], onDelete: SetNull)
+  counterpartTransfers Transfer[]   @relation("TransferPair")
+
+  // Voiding lifecycle & audit trail
+  voidReason         String?
+  voidedById         String?
+  voidedBy           User?          @relation("TransferVoider", fields: [voidedById], references: [id], onDelete: SetNull)
+  voidedAt           DateTime?
+
+  // Reversal linkage (for voided entries and their offsetting reversals)
+  reversalOfId       String?        @unique
+  reversalOf         Transfer?      @relation("TransferReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)
+  reversalEntry      Transfer?      @relation("TransferReversal")
+
+  // Audit trail
+  createdById        String?
+  createdBy          User?          @relation("TransferCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@unique([mosqueId, transferNumber, leg])
+  @@index([mosqueId])
+  @@index([transferNumber])
+  @@index([accountId])
+  @@index([fundId])
+  @@index([date])
+  @@index([status])
+  @@index([isFundTransfer])
+  @@map("transfers")
+}
