@@ -700,3 +700,4 @@ export async function closeCampaign(
   const progress = await computeCampaignProgress(campaign.id, campaign.targetAmount);
   return mapCampaignResponse(campaign, progress);
 }
+

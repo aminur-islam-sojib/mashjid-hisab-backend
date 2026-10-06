@@ -63,3 +63,4 @@ model Campaign {
   @@index([startDate])
   @@map("campaigns")
 }
+
