@@ -17,6 +17,7 @@ import {
   createDonation,
   getDonationById,
   getMosqueDonations,
+  voidDonation,
 } from "./donation.service.js";
 
 /**
@@ -72,16 +73,28 @@ export const createDonationHandler = catchAsync(
 
 /**
  * GET /api/mosques/:mosqueId/donations/:donationId
- * Access: Authenticated + MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER, STAFF
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER; MEMBER (own or own family only)
  *
- * Retrieves a single Donation record.
+ * Retrieves full details of a single Donation record with receipt number, attachments, and void info.
  */
 export const getDonationByIdHandler = catchAsync(
   async (req: Request, res: Response): Promise<void> => {
-    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
-    const donationId = validateDonationIdParam(req.params["donationId"]);
+    const mosqueId =
+      req.mosqueId ||
+      (req.params["mosqueId"] ? validateMosqueIdParam(req.params["mosqueId"]) : undefined) ||
+      (typeof req.query["mosqueId"] === "string" ? validateMosqueIdParam(req.query["mosqueId"]) : undefined);
 
-    const donation = await getDonationById(mosqueId, donationId);
+    if (!mosqueId) {
+      throw HttpError.badRequest("Mosque ID is required.", "MISSING_MOSQUE_ID");
+    }
+
+    const donationId = validateDonationIdParam(req.params["donationId"] || req.params["id"]);
+
+    const donation = await getDonationById(mosqueId, donationId, {
+      userId: req.user!.sub,
+      role: req.membership!.role,
+      membershipId: req.membership?.id,
+    });
 
     sendResponse(res, {
       statusCode: 200,
@@ -92,14 +105,22 @@ export const getDonationByIdHandler = catchAsync(
 );
 
 /**
- * GET /api/mosques/:mosqueId/donations
- * Access: Authenticated + MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER, STAFF
+ * GET /api/mosques/:mosqueId/donations AND GET /api/donations
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER
  *
  * Lists donations for a mosque with filters and pagination.
  */
 export const getMosqueDonationsHandler = catchAsync(
   async (req: Request, res: Response): Promise<void> => {
-    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const mosqueId =
+      req.mosqueId ||
+      (req.params["mosqueId"] ? validateMosqueIdParam(req.params["mosqueId"]) : undefined) ||
+      (typeof req.query["mosqueId"] === "string" ? validateMosqueIdParam(req.query["mosqueId"]) : undefined);
+
+    if (!mosqueId) {
+      throw HttpError.badRequest("Mosque ID is required.", "MISSING_MOSQUE_ID");
+    }
+
     const query = validateGetMosqueDonationsQuery(req.query);
 
     const result = await getMosqueDonations(mosqueId, query);
@@ -111,3 +132,38 @@ export const getMosqueDonationsHandler = catchAsync(
     });
   },
 );
+
+/**
+ * POST /api/mosques/:mosqueId/donations/:donationId/void
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER
+ *
+ * Voids a posted donation entry with audit reason.
+ */
+export const voidDonationHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId =
+      req.mosqueId ||
+      (req.params["mosqueId"] ? validateMosqueIdParam(req.params["mosqueId"]) : undefined);
+
+    if (!mosqueId) {
+      throw HttpError.badRequest("Mosque ID is required.", "MISSING_MOSQUE_ID");
+    }
+
+    const donationId = validateDonationIdParam(req.params["donationId"] || req.params["id"]);
+    const { validateVoidDonationInput } = await import("./donation.validation.js");
+    const { reason } = validateVoidDonationInput(req.body);
+
+    const donation = await voidDonation(mosqueId, donationId, reason, {
+      userId: req.user!.sub,
+      role: req.membership!.role,
+      membershipId: req.membership?.id,
+    });
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Donation voided successfully.",
+      data: donation,
+    });
+  },
+);
+

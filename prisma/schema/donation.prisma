@@ -63,6 +63,15 @@ model Donation {
 
   notes              String?
 
+  // Attachments (e.g. check photos, deposit slips, payment proofs)
+  attachments        String[]       @default([])
+
+  // Voiding lifecycle & audit trail
+  voidReason         String?
+  voidedById         String?
+  voidedBy           User?          @relation("DonationVoider", fields: [voidedById], references: [id], onDelete: SetNull)
+  voidedAt           DateTime?
+
   // Audit trail
   createdById        String?
   createdBy          User?          @relation("DonationRecorder", fields: [createdById], references: [id], onDelete: SetNull)

@@ -22,6 +22,7 @@ export interface CreateDonationInput {
   pledgeId?: string | null;
   source: DonationSource;
   notes?: string | null;
+  attachments?: string[];
   mosqueId?: string;
 }
 
@@ -287,6 +288,23 @@ export function validateCreateDonationInput(body: unknown): CreateDonationInput 
     }
   }
 
+  // -- attachments (optional array of strings) --------------------------------
+  let attachments: string[] = [];
+  if (raw["attachments"] !== undefined && raw["attachments"] !== null) {
+    if (!Array.isArray(raw["attachments"])) {
+      issues.push({ field: "attachments", issue: "Attachments must be an array of string URLs." });
+    } else {
+      for (let i = 0; i < raw["attachments"].length; i++) {
+        const item = raw["attachments"][i];
+        if (typeof item !== "string" || !item.trim()) {
+          issues.push({ field: `attachments[${i}]`, issue: "Attachment item must be a non-empty string." });
+        } else {
+          attachments.push(item.trim());
+        }
+      }
+    }
+  }
+
   // -- mosqueId (optional in body for root route) -----------------------------
   let mosqueId: string | undefined;
   if (raw["mosqueId"] !== undefined && raw["mosqueId"] !== null && raw["mosqueId"] !== "") {
@@ -318,6 +336,7 @@ export function validateCreateDonationInput(body: unknown): CreateDonationInput 
     pledgeId,
     source,
     notes,
+    attachments,
     mosqueId,
   };
 }
@@ -333,14 +352,19 @@ export function validateDonationIdParam(param: unknown): string {
 }
 
 export interface GetMosqueDonationsQueryInput {
+  donor?: string;
+  family?: string;
+  fund?: string;
+  campaign?: string;
+  startDate?: Date;
+  endDate?: Date;
   status?: DonationStatus;
-  fundId?: string;
+  source?: DonationSource;
   accountId?: string;
   categoryId?: string;
   memberId?: string;
   familyId?: string;
-  startDate?: Date;
-  endDate?: Date;
+  fundId?: string;
   search?: string;
   page?: number;
   limit?: number;
@@ -348,12 +372,50 @@ export interface GetMosqueDonationsQueryInput {
 
 /**
  * Validates query parameters for GET /api/mosques/:mosqueId/donations
+ *
+ * Supports filters:
+ * - donor: text search (donorName/phone/email) or memberId
+ * - family (familyId): CUID of family household
+ * - fund (fundId): CUID of fund
+ * - campaign (campaignId): campaign ID
+ * - date range: startDate/endDate, fromDate/toDate, from/to
+ * - status: PENDING, POSTED, REJECTED, VOIDED
+ * - source: CASH_BOX, MEMBER, ONLINE, BANK
+ * - pagination: page, limit
  */
 export function validateGetMosqueDonationsQuery(query: unknown): GetMosqueDonationsQueryInput {
   if (!query || typeof query !== "object") return {};
   const raw = query as Record<string, unknown>;
   const result: GetMosqueDonationsQueryInput = {};
 
+  // -- donor (memberId or donor name/phone/email search)
+  const donorVal = raw["donor"] ?? raw["memberId"];
+  if (typeof donorVal === "string" && donorVal.trim()) {
+    result.donor = donorVal.trim();
+    result.memberId = donorVal.trim();
+  }
+
+  // -- family (familyId)
+  const familyVal = raw["family"] ?? raw["familyId"];
+  if (typeof familyVal === "string" && familyVal.trim()) {
+    result.family = familyVal.trim();
+    result.familyId = familyVal.trim();
+  }
+
+  // -- fund (fundId)
+  const fundVal = raw["fund"] ?? raw["fundId"];
+  if (typeof fundVal === "string" && fundVal.trim()) {
+    result.fund = fundVal.trim();
+    result.fundId = fundVal.trim();
+  }
+
+  // -- campaign (campaignId)
+  const campaignVal = raw["campaign"] ?? raw["campaignId"];
+  if (typeof campaignVal === "string" && campaignVal.trim()) {
+    result.campaign = campaignVal.trim();
+  }
+
+  // -- status filter
   if (raw["status"] !== undefined && raw["status"] !== null && raw["status"] !== "") {
     if (typeof raw["status"] !== "string") {
       throw HttpError.badRequest("Status filter must be a string.");
@@ -367,38 +429,45 @@ export function validateGetMosqueDonationsQuery(query: unknown): GetMosqueDonati
     result.status = statusUpper as DonationStatus;
   }
 
-  if (typeof raw["fundId"] === "string" && raw["fundId"].trim()) {
-    result.fundId = raw["fundId"].trim();
+  // -- source filter
+  if (raw["source"] !== undefined && raw["source"] !== null && raw["source"] !== "") {
+    if (typeof raw["source"] !== "string") {
+      throw HttpError.badRequest("Source filter must be a string.");
+    }
+    const sourceUpper = raw["source"].trim().toUpperCase();
+    if (!Object.values(DonationSource).includes(sourceUpper as DonationSource)) {
+      throw HttpError.badRequest(
+        `Invalid donation source '${raw["source"]}'. Allowed: ${Object.values(DonationSource).join(", ")}.`,
+      );
+    }
+    result.source = sourceUpper as DonationSource;
   }
 
+  // -- accountId filter
   if (typeof raw["accountId"] === "string" && raw["accountId"].trim()) {
     result.accountId = raw["accountId"].trim();
   }
 
+  // -- categoryId filter
   if (typeof raw["categoryId"] === "string" && raw["categoryId"].trim()) {
     result.categoryId = raw["categoryId"].trim();
   }
 
-  if (typeof raw["memberId"] === "string" && raw["memberId"].trim()) {
-    result.memberId = raw["memberId"].trim();
-  }
-
-  if (typeof raw["familyId"] === "string" && raw["familyId"].trim()) {
-    result.familyId = raw["familyId"].trim();
-  }
-
-  if (raw["startDate"] !== undefined && raw["startDate"] !== null && raw["startDate"] !== "") {
-    const d = new Date(raw["startDate"] as string | number);
+  // -- date range (startDate / endDate / from / to / fromDate / toDate)
+  const rawStart = raw["startDate"] ?? raw["fromDate"] ?? raw["from"];
+  if (rawStart !== undefined && rawStart !== null && rawStart !== "") {
+    const d = new Date(rawStart as string | number);
     if (isNaN(d.getTime())) {
-      throw HttpError.badRequest("Invalid startDate format.");
+      throw HttpError.badRequest("Invalid startDate/from format. Expected valid date.");
     }
     result.startDate = d;
   }
 
-  if (raw["endDate"] !== undefined && raw["endDate"] !== null && raw["endDate"] !== "") {
-    const d = new Date(raw["endDate"] as string | number);
+  const rawEnd = raw["endDate"] ?? raw["toDate"] ?? raw["to"];
+  if (rawEnd !== undefined && rawEnd !== null && rawEnd !== "") {
+    const d = new Date(rawEnd as string | number);
     if (isNaN(d.getTime())) {
-      throw HttpError.badRequest("Invalid endDate format.");
+      throw HttpError.badRequest("Invalid endDate/to format. Expected valid date.");
     }
     result.endDate = d;
   }
@@ -424,5 +493,27 @@ export function validateGetMosqueDonationsQuery(query: unknown): GetMosqueDonati
   }
 
   return result;
+}
+
+export interface VoidDonationInput {
+  reason: string;
+}
+
+/**
+ * Validates request payload for POST /api/mosques/:mosqueId/donations/:donationId/void
+ */
+export function validateVoidDonationInput(body: unknown): VoidDonationInput {
+  if (!body || typeof body !== "object") {
+    throw HttpError.badRequest("Request body must be a JSON object.");
+  }
+  const raw = body as Record<string, unknown>;
+  if (typeof raw["reason"] !== "string" || !raw["reason"].trim()) {
+    throw HttpError.badRequest("Void reason is required.", "MISSING_VOID_REASON");
+  }
+  const reason = raw["reason"].trim();
+  if (reason.length > 500) {
+    throw HttpError.badRequest("Void reason cannot exceed 500 characters.", "INVALID_VOID_REASON");
+  }
+  return { reason };
 }
 

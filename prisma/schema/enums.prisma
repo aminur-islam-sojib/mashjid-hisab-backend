@@ -108,6 +108,7 @@ enum DonationStatus {
   PENDING
   POSTED
   REJECTED
+  VOIDED
 }
 
 // ---------------------------------------------------------------------------

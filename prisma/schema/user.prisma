@@ -54,6 +54,7 @@ model User {
   emailVerificationTokens EmailVerificationToken[]
   recordedDonations       Donation[]            @relation("DonationRecorder")
   postedDonations         Donation[]            @relation("DonationPoster")
+  voidedDonations         Donation[]            @relation("DonationVoider")
 
   @@map("users")
 }

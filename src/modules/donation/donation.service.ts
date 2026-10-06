@@ -10,14 +10,30 @@ import {
   DonationSource,
   CategoryType,
   MembershipStatus,
+  AccountType,
+  FundType,
   type Prisma,
 } from "../../../generated/prisma/client.js";
 import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
-import type { CreateDonationInput } from "./donation.validation.js";
+import type {
+  CreateDonationInput,
+  GetMosqueDonationsQueryInput,
+} from "./donation.validation.js";
 
 export interface DonationActor {
   userId: string;
   role: Role;
+  membershipId?: string;
+}
+
+export interface VoidInfo {
+  voidedAt: Date;
+  voidReason: string | null;
+  voidedBy: {
+    id: string;
+    name: string;
+    email: string | null;
+  } | null;
 }
 
 export interface DonationResponseItem {
@@ -41,6 +57,8 @@ export interface DonationResponseItem {
   status: DonationStatus;
   receiptNumber: string | null;
   notes: string | null;
+  attachments: string[];
+  voidInfo: VoidInfo | null;
   createdById: string | null;
   postedById: string | null;
   postedAt: Date | null;
@@ -49,11 +67,13 @@ export interface DonationResponseItem {
   account?: {
     id: string;
     name: string;
+    type?: AccountType;
     accountNumber: string | null;
   };
   fund?: {
     id: string;
     name: string;
+    type?: FundType;
     isRestricted: boolean;
   };
   category?: {
@@ -64,12 +84,21 @@ export interface DonationResponseItem {
   member?: {
     id: string;
     user: {
+      id?: string;
       name: string;
       email: string | null;
       phone: string | null;
     };
   } | null;
   family?: {
+    id: string;
+    name: string;
+  } | null;
+  createdBy?: {
+    id: string;
+    name: string;
+  } | null;
+  postedBy?: {
     id: string;
     name: string;
   } | null;
@@ -297,6 +326,21 @@ export async function generateNextReceiptNumber(
  * Maps a Prisma donation record with relations to the public response shape.
  */
 function mapDonationResponse(donation: any): DonationResponseItem {
+  const voidInfo: VoidInfo | null =
+    donation.status === DonationStatus.VOIDED || donation.voidedAt
+      ? {
+          voidedAt: donation.voidedAt ?? donation.updatedAt,
+          voidReason: donation.voidReason ?? null,
+          voidedBy: donation.voidedBy
+            ? {
+                id: donation.voidedBy.id,
+                name: donation.voidedBy.name,
+                email: donation.voidedBy.email ?? null,
+              }
+            : null,
+        }
+      : null;
+
   return {
     id: donation.id,
     mosqueId: donation.mosqueId,
@@ -318,6 +362,8 @@ function mapDonationResponse(donation: any): DonationResponseItem {
     status: donation.status,
     receiptNumber: donation.receiptNumber,
     notes: donation.notes,
+    attachments: donation.attachments ?? [],
+    voidInfo,
     createdById: donation.createdById,
     postedById: donation.postedById,
     postedAt: donation.postedAt,
@@ -327,6 +373,7 @@ function mapDonationResponse(donation: any): DonationResponseItem {
       ? {
           id: donation.account.id,
           name: donation.account.name,
+          type: donation.account.type,
           accountNumber: donation.account.accountNumber ?? null,
         }
       : undefined,
@@ -334,6 +381,7 @@ function mapDonationResponse(donation: any): DonationResponseItem {
       ? {
           id: donation.fund.id,
           name: donation.fund.name,
+          type: donation.fund.type,
           isRestricted: donation.fund.isRestricted,
         }
       : undefined,
@@ -348,9 +396,10 @@ function mapDonationResponse(donation: any): DonationResponseItem {
       ? {
           id: donation.member.id,
           user: {
-            name: donation.member.user.name,
-            email: donation.member.user.email ?? null,
-            phone: donation.member.user.phone ?? null,
+            id: donation.member.user?.id,
+            name: donation.member.user?.name,
+            email: donation.member.user?.email ?? null,
+            phone: donation.member.user?.phone ?? null,
           },
         }
       : donation.member === null
@@ -362,6 +411,22 @@ function mapDonationResponse(donation: any): DonationResponseItem {
           name: donation.family.name,
         }
       : donation.family === null
+      ? null
+      : undefined,
+    createdBy: donation.createdBy
+      ? {
+          id: donation.createdBy.id,
+          name: donation.createdBy.name,
+        }
+      : donation.createdBy === null
+      ? null
+      : undefined,
+    postedBy: donation.postedBy
+      ? {
+          id: donation.postedBy.id,
+          name: donation.postedBy.name,
+        }
+      : donation.postedBy === null
       ? null
       : undefined,
   };
@@ -472,21 +537,25 @@ export async function createDonation(
             status,
             receiptNumber,
             notes: input.notes ?? null,
+            attachments: input.attachments ?? [],
             createdById: actor.userId,
             postedById,
             postedAt,
           },
           include: {
-            account: { select: { id: true, name: true, accountNumber: true } },
-            fund: { select: { id: true, name: true, isRestricted: true } },
+            account: { select: { id: true, name: true, type: true, accountNumber: true } },
+            fund: { select: { id: true, name: true, type: true, isRestricted: true } },
             category: { select: { id: true, name: true, type: true } },
             member: {
               select: {
                 id: true,
-                user: { select: { name: true, email: true, phone: true } },
+                user: { select: { id: true, name: true, email: true, phone: true } },
               },
             },
             family: { select: { id: true, name: true } },
+            createdBy: { select: { id: true, name: true } },
+            postedBy: { select: { id: true, name: true } },
+            voidedBy: { select: { id: true, name: true, email: true } },
           },
         });
 
@@ -511,10 +580,18 @@ export async function createDonation(
 
 /**
  * Retrieves a single donation by ID within a mosque.
+ *
+ * Authorization rules:
+ *  - MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER (Oversight): Can view any donation in the mosque.
+ *  - MEMBER: Can view only own donation or own family's donation.
+ *  - Others: Forbidden.
+ *
+ * Returns full details with receipt number, attachments, and void info.
  */
 export async function getDonationById(
   mosqueId: string,
   donationId: string,
+  actor: DonationActor,
 ): Promise<DonationResponseItem> {
   const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
 
@@ -524,16 +601,20 @@ export async function getDonationById(
       mosqueId: resolvedMosqueId,
     },
     include: {
-      account: { select: { id: true, name: true, accountNumber: true } },
-      fund: { select: { id: true, name: true, isRestricted: true } },
+      account: { select: { id: true, name: true, type: true, accountNumber: true } },
+      fund: { select: { id: true, name: true, type: true, isRestricted: true } },
       category: { select: { id: true, name: true, type: true } },
       member: {
         select: {
           id: true,
-          user: { select: { name: true, email: true, phone: true } },
+          userId: true,
+          user: { select: { id: true, name: true, email: true, phone: true } },
         },
       },
       family: { select: { id: true, name: true } },
+      createdBy: { select: { id: true, name: true } },
+      postedBy: { select: { id: true, name: true } },
+      voidedBy: { select: { id: true, name: true, email: true } },
     },
   });
 
@@ -541,29 +622,73 @@ export async function getDonationById(
     throw HttpError.notFound("Donation record not found.", "DONATION_NOT_FOUND");
   }
 
-  return mapDonationResponse(donation);
-}
+  // Check role authorization
+  const isOversight =
+    actor.role === Role.MOSQUE_ADMIN ||
+    actor.role === Role.TREASURER ||
+    actor.role === Role.COMMITTEE_MEMBER;
 
-export interface GetMosqueDonationsQuery {
-  status?: DonationStatus;
-  fundId?: string;
-  accountId?: string;
-  categoryId?: string;
-  memberId?: string;
-  familyId?: string;
-  startDate?: Date;
-  endDate?: Date;
-  search?: string;
-  page?: number;
-  limit?: number;
+  if (!isOversight) {
+    // If not oversight, only own or own family's donation is allowed
+    // 1. Check if own donation
+    const isOwnDonation =
+      (actor.membershipId && donation.memberId === actor.membershipId) ||
+      donation.member?.userId === actor.userId ||
+      donation.createdById === actor.userId;
+
+    if (!isOwnDonation) {
+      // 2. Check if own family's donation
+      let isOwnFamily = false;
+      const callerMembership = await prisma.membership.findFirst({
+        where: {
+          userId: actor.userId,
+          mosqueId: resolvedMosqueId,
+          status: MembershipStatus.ACTIVE,
+        },
+        include: {
+          headOfFamily: { select: { id: true } },
+          linkedFamilyMember: { select: { familyId: true } },
+        },
+      });
+
+      const callerFamilyId =
+        callerMembership?.headOfFamily?.id ??
+        callerMembership?.linkedFamilyMember?.familyId ??
+        null;
+
+      if (callerFamilyId && donation.familyId && donation.familyId === callerFamilyId) {
+        isOwnFamily = true;
+      }
+
+      if (!isOwnFamily) {
+        throw HttpError.forbidden(
+          "Access denied. Members can only view their own or their family's donation receipts.",
+          "FORBIDDEN",
+        );
+      }
+    }
+  }
+
+  return mapDonationResponse(donation);
 }
 
 /**
  * Lists donations for a mosque with filtering and pagination.
+ *
+ * Filters supported:
+ *  - donor: search string or memberId
+ *  - family / familyId: household ID
+ *  - fund / fundId: fund ID
+ *  - campaign / campaignId: campaign ID
+ *  - startDate / endDate: date range filter
+ *  - status: DonationStatus enum filter
+ *  - source: DonationSource enum filter
+ *  - search: text search across receipt number, donor name, and notes
+ *  - page, limit: pagination controls
  */
 export async function getMosqueDonations(
   mosqueId: string,
-  query: GetMosqueDonationsQuery = {},
+  query: GetMosqueDonationsQueryInput = {},
 ) {
   const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
 
@@ -571,40 +696,80 @@ export async function getMosqueDonations(
   const limit = Math.min(100, Math.max(1, query.limit ?? 20));
   const skip = (page - 1) * limit;
 
-  const where: Prisma.DonationWhereInput = {
-    mosqueId: resolvedMosqueId,
-  };
+  const andConditions: Prisma.DonationWhereInput[] = [
+    { mosqueId: resolvedMosqueId },
+  ];
 
+  // Status filter
   if (query.status) {
-    where.status = query.status;
+    andConditions.push({ status: query.status });
   }
-  if (query.fundId) {
-    where.fundId = query.fundId;
+
+  // Source filter
+  if (query.source) {
+    andConditions.push({ source: query.source });
   }
+
+  // Fund filter
+  const targetFundId = query.fund ?? query.fundId;
+  if (targetFundId) {
+    andConditions.push({ fundId: targetFundId });
+  }
+
+  // Account filter
   if (query.accountId) {
-    where.accountId = query.accountId;
+    andConditions.push({ accountId: query.accountId });
   }
+
+  // Category filter
   if (query.categoryId) {
-    where.categoryId = query.categoryId;
+    andConditions.push({ categoryId: query.categoryId });
   }
-  if (query.memberId) {
-    where.memberId = query.memberId;
+
+  // Family filter
+  const targetFamilyId = query.family ?? query.familyId;
+  if (targetFamilyId) {
+    andConditions.push({ familyId: targetFamilyId });
   }
-  if (query.familyId) {
-    where.familyId = query.familyId;
+
+  // Campaign filter
+  if (query.campaign) {
+    andConditions.push({ campaignId: query.campaign });
   }
+
+  // Date range filter
   if (query.startDate || query.endDate) {
-    where.date = {};
-    if (query.startDate) where.date.gte = query.startDate;
-    if (query.endDate) where.date.lte = query.endDate;
+    const dateFilter: Prisma.DateTimeFilter = {};
+    if (query.startDate) dateFilter.gte = query.startDate;
+    if (query.endDate) dateFilter.lte = query.endDate;
+    andConditions.push({ date: dateFilter });
   }
+
+  // Donor filter (memberId or donorName/donorPhone/donorEmail search)
+  const targetDonor = query.donor ?? query.memberId;
+  if (targetDonor) {
+    andConditions.push({
+      OR: [
+        { memberId: targetDonor },
+        { donorName: { contains: targetDonor, mode: "insensitive" } },
+        { donorPhone: { contains: targetDonor, mode: "insensitive" } },
+        { donorEmail: { contains: targetDonor, mode: "insensitive" } },
+      ],
+    });
+  }
+
+  // Text search
   if (query.search) {
-    where.OR = [
-      { receiptNumber: { contains: query.search, mode: "insensitive" } },
-      { donorName: { contains: query.search, mode: "insensitive" } },
-      { notes: { contains: query.search, mode: "insensitive" } },
-    ];
+    andConditions.push({
+      OR: [
+        { receiptNumber: { contains: query.search, mode: "insensitive" } },
+        { donorName: { contains: query.search, mode: "insensitive" } },
+        { notes: { contains: query.search, mode: "insensitive" } },
+      ],
+    });
   }
+
+  const where: Prisma.DonationWhereInput = { AND: andConditions };
 
   const [totalCount, donations] = await prisma.$transaction([
     prisma.donation.count({ where }),
@@ -614,16 +779,19 @@ export async function getMosqueDonations(
       take: limit,
       orderBy: { date: "desc" },
       include: {
-        account: { select: { id: true, name: true, accountNumber: true } },
-        fund: { select: { id: true, name: true, isRestricted: true } },
+        account: { select: { id: true, name: true, type: true, accountNumber: true } },
+        fund: { select: { id: true, name: true, type: true, isRestricted: true } },
         category: { select: { id: true, name: true, type: true } },
         member: {
           select: {
             id: true,
-            user: { select: { name: true, email: true, phone: true } },
+            user: { select: { id: true, name: true, email: true, phone: true } },
           },
         },
         family: { select: { id: true, name: true } },
+        createdBy: { select: { id: true, name: true } },
+        postedBy: { select: { id: true, name: true } },
+        voidedBy: { select: { id: true, name: true, email: true } },
       },
     }),
   ]);
@@ -641,3 +809,58 @@ export async function getMosqueDonations(
   };
 }
 
+/**
+ * Voids a posted donation entry.
+ *
+ * Only MOSQUE_ADMIN or TREASURER can void a donation.
+ */
+export async function voidDonation(
+  mosqueId: string,
+  donationId: string,
+  reason: string,
+  actor: DonationActor,
+): Promise<DonationResponseItem> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  const donation = await prisma.donation.findFirst({
+    where: {
+      id: donationId,
+      mosqueId: resolvedMosqueId,
+    },
+  });
+
+  if (!donation) {
+    throw HttpError.notFound("Donation record not found.", "DONATION_NOT_FOUND");
+  }
+
+  if (donation.status === DonationStatus.VOIDED) {
+    throw HttpError.badRequest("Donation has already been voided.", "ALREADY_VOIDED");
+  }
+
+  const updated = await prisma.donation.update({
+    where: { id: donationId },
+    data: {
+      status: DonationStatus.VOIDED,
+      voidReason: reason,
+      voidedById: actor.userId,
+      voidedAt: new Date(),
+    },
+    include: {
+      account: { select: { id: true, name: true, type: true, accountNumber: true } },
+      fund: { select: { id: true, name: true, type: true, isRestricted: true } },
+      category: { select: { id: true, name: true, type: true } },
+      member: {
+        select: {
+          id: true,
+          user: { select: { id: true, name: true, email: true, phone: true } },
+        },
+      },
+      family: { select: { id: true, name: true } },
+      createdBy: { select: { id: true, name: true } },
+      postedBy: { select: { id: true, name: true } },
+      voidedBy: { select: { id: true, name: true, email: true } },
+    },
+  });
+
+  return mapDonationResponse(updated);
+}
