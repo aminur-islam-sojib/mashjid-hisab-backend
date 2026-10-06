@@ -63,6 +63,8 @@ model User {
   voidedTransfers         Transfer[]            @relation("TransferVoider")
   rejectedDonations       Donation[]            @relation("DonationRejecter")
   rejectedExpenses        Expense[]             @relation("ExpenseRejecter")
+  createdCampaigns        Campaign[]            @relation("CampaignCreator")
+  closedCampaigns         Campaign[]            @relation("CampaignCloser")
 
   @@map("users")
 }

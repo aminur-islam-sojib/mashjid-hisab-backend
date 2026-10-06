@@ -152,3 +152,11 @@ enum TransferStatus {
   VOIDED // Reversal created and original voided
 }
 
+// ---------------------------------------------------------------------------
+// CampaignStatus
+// Lifecycle of a fundraising campaign.
+// ---------------------------------------------------------------------------
+enum CampaignStatus {
+  ACTIVE // Accepting donations
+  CLOSED // Manually closed; history frozen, no new donations accepted
+}

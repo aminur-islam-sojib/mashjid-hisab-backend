@@ -50,6 +50,7 @@ model Mosque {
   donations   Donation[]
   expenses    Expense[]
   transfers   Transfer[]
+  campaigns   Campaign[]
 
   @@map("mosques")
 }

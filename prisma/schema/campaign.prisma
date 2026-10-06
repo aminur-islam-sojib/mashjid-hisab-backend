@@ -1,0 +1,65 @@
+// =============================================================================
+// campaign.prisma — Domain E: Fundraising Campaigns
+//
+// Design notes:
+//  • A Campaign is a time-boxed fundraising drive (construction, madrasa,
+//    Ramadan iftar, qurbani, etc.) tied to a single Fund.
+//  • raisedAmount is a derived (computed) figure — the service layer aggregates
+//    POSTED donations where campaignId matches, guaranteeing consistency with
+//    the double-entry ledger. The schema field is for denormalised caching only.
+//  • isPublic controls transparency-page visibility; only ADMIN/TREAS/COMM
+//    can see non-public campaigns.
+//  • status lifecycle:
+//      ACTIVE   — accepting donations; the default on creation.
+//      CLOSED   — manually closed via POST /campaigns/:id/close. No new
+//                 donations are accepted; history is frozen and the final
+//                 raisedAmount snapshot is stored.
+//  • Changing fundId after any donation is linked is blocked at the service
+//    layer (CAMPAIGN_FUND_LOCKED).
+//  • @@unique([mosqueId, title]) prevents duplicate campaign names per mosque.
+// =============================================================================
+
+model Campaign {
+  id           String         @id @default(cuid())
+  mosqueId     String
+  mosque       Mosque         @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  // Fund this campaign raises money into. Immutable once donations are linked.
+  fundId       String
+  fund         Fund           @relation(fields: [fundId], references: [id], onDelete: Restrict)
+
+  title        String
+  description  String?
+
+  // Target amount in minor units (poisha). Optional — some campaigns have no
+  // hard limit (e.g. open-ended iftar collections).
+  targetAmount BigInt?
+
+  // Campaign window
+  startDate    DateTime
+  endDate      DateTime?
+
+  // Public transparency flag. Members see only public campaigns unless
+  // they hold an oversight role.
+  isPublic     Boolean        @default(true)
+
+  // Lifecycle
+  status       CampaignStatus @default(ACTIVE)
+  closedAt     DateTime?
+  closedById   String?
+  closedBy     User?          @relation("CampaignCloser", fields: [closedById], references: [id], onDelete: SetNull)
+
+  // Audit trail
+  createdById  String?
+  createdBy    User?          @relation("CampaignCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@unique([mosqueId, title])
+  @@index([mosqueId])
+  @@index([fundId])
+  @@index([status])
+  @@index([startDate])
+  @@map("campaigns")
+}
