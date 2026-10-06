@@ -11,6 +11,7 @@ import mosqueRouter, {
 } from "../modules/mosque/mosque.routes.js";
 import membershipRouter from "../modules/membership/membership.routes.js";
 import donationRouter from "../modules/donation/donation.routes.js";
+import expenseRouter from "../modules/expense/expense.routes.js";
 import { publicInviteLinkRouter } from "../modules/invite-link/invite-link.routes.js";
 
 const apiRouter: Router = Router();
@@ -20,6 +21,7 @@ apiRouter.use("/users", userRouter);
 apiRouter.use("/mosques", mosqueRouter);
 apiRouter.use("/memberships", membershipRouter);
 apiRouter.use("/donations", donationRouter);
+apiRouter.use("/expenses", expenseRouter);
 
 // Public routes (transparency, public mosque profile, donation summaries, invite links)
 const publicRouter: Router = Router();

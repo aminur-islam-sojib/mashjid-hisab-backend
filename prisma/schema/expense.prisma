@@ -1,0 +1,91 @@
+// =============================================================================
+// expense.prisma — Domain D: Mosque Expenses & Operational Spending
+//
+// Design notes:
+//  • Records disbursements and spending for a mosque.
+//  • Linked to physical Account (where money leaves), Fund (which fund pays),
+//    and Category (must be CategoryType.EXPENSE).
+//  • Verifies available balance in both Account and Fund prior to posting.
+//  • Payee tracks recipient (vendor, contractor, utility, or staff).
+//  • Lifecycle & approval rules:
+//      - ADMIN: posts immediately (status = POSTED, voucher generated if absent).
+//      - TREASURER: posts immediately UNLESS amount > mosque.expenseApprovalLimit.
+//                   If above limit, status = PENDING_APPROVAL and needs ADMIN.
+//      - STAFF: saved as PENDING for review.
+//  • Sequential voucher numbers are scoped and unique per mosque:
+//      @@unique([mosqueId, voucherNo])
+// =============================================================================
+
+model Expense {
+  id                 String        @id @default(cuid())
+  mosqueId           String
+  mosque             Mosque        @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  // Monetary value in minor units (poisha), strictly positive BigInt
+  amount             BigInt
+
+  // Finance linkages
+  accountId          String
+  account            Account       @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  fundId             String
+  fund               Fund          @relation(fields: [fundId], references: [id], onDelete: Restrict)
+
+  categoryId         String
+  category           Category      @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  // Financial date of expense
+  date               DateTime
+
+  // Payee information (vendor, contractor, service provider, or individual)
+  payee              String
+
+  // Voucher tracking
+  voucherNo          String?
+
+  // Posting & approval lifecycle
+  status             ExpenseStatus @default(PENDING)
+
+  // Description / Notes
+  notes              String?
+
+  // Attachments (e.g. bill photo, invoice, payment slip)
+  attachments        String[]      @default([])
+
+  // Approval audit trail (for entries requiring admin sign-off)
+  approvedById       String?
+  approvedBy         User?         @relation("ExpenseApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt         DateTime?
+
+  // Voiding lifecycle & audit trail
+  voidReason         String?
+  voidedById         String?
+  voidedBy           User?         @relation("ExpenseVoider", fields: [voidedById], references: [id], onDelete: SetNull)
+  voidedAt           DateTime?
+
+  // Reversal linkage (for voided entries and their offsetting reversals)
+  reversalOfId       String?       @unique
+  reversalOf         Expense?      @relation("ExpenseReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)
+  reversalEntry      Expense?      @relation("ExpenseReversal")
+
+  // Audit trail
+  createdById        String?
+  createdBy          User?         @relation("ExpenseRecorder", fields: [createdById], references: [id], onDelete: SetNull)
+
+  postedById         String?
+  postedBy           User?         @relation("ExpensePoster", fields: [postedById], references: [id], onDelete: SetNull)
+  postedAt           DateTime?
+
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@unique([mosqueId, voucherNo])
+  @@index([mosqueId])
+  @@index([accountId])
+  @@index([fundId])
+  @@index([categoryId])
+  @@index([date])
+  @@index([status])
+  @@map("expenses")
+}
+

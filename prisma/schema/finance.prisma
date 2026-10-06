@@ -31,6 +31,7 @@ model Fund {
 
   categories   Category[]
   donations    Donation[]
+  expenses     Expense[]
 
   @@unique([mosqueId, name])
   @@index([mosqueId])
@@ -57,6 +58,7 @@ model Account {
   updatedAt      DateTime    @updatedAt
 
   donations      Donation[]
+  expenses       Expense[]
 
   @@unique([mosqueId, name])
   @@index([mosqueId])
@@ -82,6 +84,7 @@ model Category {
   updatedAt  DateTime     @updatedAt
 
   donations  Donation[]
+  expenses   Expense[]
 
   @@unique([mosqueId, name, type])
   @@index([mosqueId])

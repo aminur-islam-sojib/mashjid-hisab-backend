@@ -66,7 +66,21 @@ export const OPERATIONAL_ROLES: readonly Role[] = [
  * Roles permitted to record donations and collections.
  * MOSQUE_ADMIN, TREASURER (post immediately); STAFF (saved as PENDING).
  */
+/**
+ * Roles permitted to record donations and collections.
+ * MOSQUE_ADMIN, TREASURER (post immediately); STAFF (saved as PENDING).
+ */
 export const COLLECTION_OPERATOR_ROLES: readonly Role[] = [
+  Role.MOSQUE_ADMIN,
+  Role.TREASURER,
+  Role.STAFF,
+] as const;
+
+/**
+ * Roles permitted to record disbursements and expenses.
+ * MOSQUE_ADMIN, TREASURER (post immediately / pending approval); STAFF (saved as PENDING).
+ */
+export const EXPENSE_OPERATOR_ROLES: readonly Role[] = [
   Role.MOSQUE_ADMIN,
   Role.TREASURER,
   Role.STAFF,
@@ -137,6 +151,8 @@ export function requireMosqueMembership(
         typeof req.params["mosqueId"] === "string" ? req.params["mosqueId"] : undefined;
       const paramDonationId =
         typeof req.params["donationId"] === "string" ? req.params["donationId"] : undefined;
+      const paramExpenseId =
+        typeof req.params["expenseId"] === "string" ? req.params["expenseId"] : undefined;
       const paramId =
         typeof req.params["id"] === "string" ? req.params["id"] : undefined;
 
@@ -149,6 +165,16 @@ export function requireMosqueMembership(
         });
         if (donationRecord) {
           mosqueId = donationRecord.mosqueId;
+        }
+      }
+
+      if (!mosqueId && paramExpenseId) {
+        const expenseRecord = await prisma.expense.findUnique({
+          where: { id: paramExpenseId },
+          select: { mosqueId: true },
+        });
+        if (expenseRecord) {
+          mosqueId = expenseRecord.mosqueId;
         }
       }
 
@@ -167,7 +193,15 @@ export function requireMosqueMembership(
           if (donationRecord) {
             mosqueId = donationRecord.mosqueId;
           } else {
-            mosqueId = paramId;
+            const expenseRecord = await prisma.expense.findUnique({
+              where: { id: paramId },
+              select: { mosqueId: true },
+            });
+            if (expenseRecord) {
+              mosqueId = expenseRecord.mosqueId;
+            } else {
+              mosqueId = paramId;
+            }
           }
         }
       }

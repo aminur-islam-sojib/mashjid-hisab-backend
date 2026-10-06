@@ -122,3 +122,15 @@ enum DonationSource {
   BANK
 }
 
+// ---------------------------------------------------------------------------
+// ExpenseStatus
+// Lifecycle of an expense entry.
+// ---------------------------------------------------------------------------
+enum ExpenseStatus {
+  PENDING           // Saved by STAFF, pending review
+  PENDING_APPROVAL  // Recorded by TREASURER above mosque approval limit, requires ADMIN
+  POSTED            // Approved & posted to the ledger
+  REJECTED          // Rejected by admin
+  VOIDED            // Voided with reversal entry
+}
+

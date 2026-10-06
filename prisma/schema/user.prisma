@@ -55,6 +55,10 @@ model User {
   recordedDonations       Donation[]            @relation("DonationRecorder")
   postedDonations         Donation[]            @relation("DonationPoster")
   voidedDonations         Donation[]            @relation("DonationVoider")
+  recordedExpenses        Expense[]             @relation("ExpenseRecorder")
+  postedExpenses          Expense[]             @relation("ExpensePoster")
+  approvedExpenses        Expense[]             @relation("ExpenseApprover")
+  voidedExpenses          Expense[]             @relation("ExpenseVoider")
 
   @@map("users")
 }

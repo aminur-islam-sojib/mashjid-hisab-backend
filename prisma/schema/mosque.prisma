@@ -28,6 +28,9 @@ model Mosque {
   /// Accounting books closed up to this date. Transactions on or before this date are frozen.
   closedPeriodUntil DateTime?
 
+  /// Expense amount threshold (in minor units / poisha) above which treasurer spending requires admin approval.
+  expenseApprovalLimit BigInt?
+
   // -- Soft delete / lifecycle ----------------------------------------------
   isArchived Boolean   @default(false)
   archivedAt DateTime?
@@ -45,6 +48,7 @@ model Mosque {
   families    Family[]
   inviteLinks MosqueInviteLink[]
   donations   Donation[]
+  expenses    Expense[]
 
   @@map("mosques")
 }
