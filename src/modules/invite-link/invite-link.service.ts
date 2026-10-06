@@ -12,6 +12,7 @@
 // ---------------------------------------------------------------------------
 
 import { prisma } from "../../lib/prisma.js";
+import { HttpError } from "../../errors/HttpError.js";
 import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
 import { generateOpaqueToken } from "../../utils/token.js";
 import { Role, Prisma } from "../../../generated/prisma/client.js";
@@ -177,5 +178,93 @@ export async function getMosqueInviteLinks(
     };
   });
 }
+
+/**
+ * Revokes an existing MosqueInviteLink.
+ * Sets isArchived: true (causing live isActive to become false) without deleting the row.
+ * Preserves the audit trail of who joined through it, consistent with Fund/Account archival.
+ *
+ * Security & Business Rules:
+ * 1. Multi-Tenant Scoping: Ensures link belongs to resolvedMosqueId.
+ *    Throws 404 INVITE_LINK_NOT_FOUND if not found or belongs to another tenant.
+ * 2. Idempotency / Already Revoked Guard:
+ *    Throws 400 INVITE_LINK_ALREADY_REVOKED if already revoked/archived.
+ * 3. Audit Preservation: The row remains intact for historical lookup and reporting.
+ *
+ * @param mosqueId - Identifier (CUID or slug) of the target mosque
+ * @param linkId - CUID of the invite link to revoke
+ */
+export async function revokeInviteLink(
+  mosqueId: string,
+  linkId: string,
+): Promise<MosqueInviteLinkItem> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  const existingLink = await prisma.mosqueInviteLink.findFirst({
+    where: {
+      id: linkId,
+      mosqueId: resolvedMosqueId,
+    },
+    include: {
+      createdBy: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+    },
+  });
+
+  if (!existingLink) {
+    throw HttpError.notFound("Invite link not found.", "INVITE_LINK_NOT_FOUND");
+  }
+
+  if (existingLink.isArchived) {
+    throw HttpError.badRequest(
+      "Invite link is already revoked.",
+      "INVITE_LINK_ALREADY_REVOKED",
+    );
+  }
+
+  const updated = await prisma.mosqueInviteLink.update({
+    where: { id: existingLink.id },
+    data: { isArchived: true },
+    include: {
+      createdBy: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+    },
+  });
+
+  const now = new Date();
+  const isExpired = updated.expiresAt ? updated.expiresAt.getTime() <= now.getTime() : false;
+  const isExhausted = updated.maxUses !== null ? updated.useCount >= updated.maxUses : false;
+  const isActive = false; // Explicitly false since isArchived is true
+
+  return {
+    id: updated.id,
+    mosqueId: updated.mosqueId,
+    role: updated.role,
+    maxUses: updated.maxUses,
+    useCount: updated.useCount,
+    expiresAt: updated.expiresAt,
+    isActive,
+    isArchived: updated.isArchived,
+    isExpired,
+    isExhausted,
+    createdById: updated.createdById,
+    createdBy: updated.createdBy ?? null,
+    createdAt: updated.createdAt,
+    updatedAt: updated.updatedAt,
+  };
+}
+
+export const revokeMosqueInviteLink = revokeInviteLink;
+
 
 

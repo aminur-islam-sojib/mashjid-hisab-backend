@@ -9,10 +9,12 @@ import { validateMosqueIdParam } from "../mosque/mosque.validation.js";
 import {
   validateCreateInviteLinkInput,
   validateGetMosqueInviteLinksQuery,
+  validateInviteLinkIdParam,
 } from "./invite-link.validation.js";
 import {
   createInviteLink,
   getMosqueInviteLinks,
+  revokeInviteLink,
 } from "./invite-link.service.js";
 
 /**
@@ -58,5 +60,30 @@ export const getMosqueInviteLinksHandler = catchAsync(
     });
   },
 );
+
+/**
+ * POST /api/mosques/:mosqueId/invite-links/:id/revoke
+ * Access: Authenticated + MOSQUE_ADMIN (ADMIN_ONLY_ROLES)
+ *
+ * Sets isActive: false (via isArchived: true) without deleting the row.
+ * Preserves the audit trail of who joined through it.
+ */
+export const revokeInviteLinkHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const linkId = validateInviteLinkIdParam(req.params["id"] || req.params["linkId"]);
+
+    const revokedLink = await revokeInviteLink(mosqueId, linkId);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Invite link revoked successfully.",
+      data: revokedLink,
+    });
+  },
+);
+
+export const revokeMosqueInviteLinkHandler = revokeInviteLinkHandler;
+
 
 

@@ -11,6 +11,7 @@ import {
 import {
   createInviteLinkHandler,
   getMosqueInviteLinksHandler,
+  revokeInviteLinkHandler,
 } from "./invite-link.controller.js";
 
 const inviteLinkRouter: Router = Router({ mergeParams: true });
@@ -42,6 +43,21 @@ inviteLinkRouter.get(
   getMosqueInviteLinksHandler,
 );
 
+/**
+ * POST /api/mosques/:mosqueId/invite-links/:id/revoke
+ * Access: Authenticated + MOSQUE_ADMIN (ADMIN_ONLY_ROLES)
+ *
+ * Sets isActive: false without deleting the row — preserves the audit trail
+ * of who joined through it, consistent with Fund/Account archival.
+ */
+inviteLinkRouter.post(
+  "/:id/revoke",
+  authenticate,
+  requireMosqueMembership(...ADMIN_ONLY_ROLES),
+  revokeInviteLinkHandler,
+);
+
 export default inviteLinkRouter;
+
 
 
