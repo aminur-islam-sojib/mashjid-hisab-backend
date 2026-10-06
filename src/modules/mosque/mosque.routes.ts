@@ -11,6 +11,7 @@ import fundRouter from "../fund/fund.routes.js";
 import accountRouter from "../account/account.routes.js";
 import categoryRouter from "../category/category.routes.js";
 import familyRouter from "../family/family.routes.js";
+import inviteLinkRouter from "../invite-link/invite-link.routes.js";
 import {
   createMosqueHandler,
   getUserMosquesHandler,
@@ -60,6 +61,12 @@ mosqueRouter.use("/:mosqueId/categories", categoryRouter);
  * Delegated to Family Router (household creation, members, headship transfer, etc.)
  */
 mosqueRouter.use("/:mosqueId/families", familyRouter);
+
+/**
+ * /api/mosques/:mosqueId/invite-links
+ * Delegated to Invite Link Router (admin-managed invite links generation, listing, etc.)
+ */
+mosqueRouter.use("/:mosqueId/invite-links", inviteLinkRouter);
 
 /**
  * GET /api/mosques/:mosqueId

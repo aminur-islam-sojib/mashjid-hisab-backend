@@ -47,6 +47,7 @@ model User {
   /// Invites this user has sent to others.
   sentInvites             Membership[]          @relation("InvitedBy")
   sentMembershipInvites   MembershipInvite[]    @relation("InviteSentBy")
+  createdInviteLinks      MosqueInviteLink[]    @relation("InviteLinkCreator")
 
   refreshTokens           RefreshToken[]
   passwordResetTokens     PasswordResetToken[]

@@ -1,0 +1,37 @@
+// =============================================================================
+// invite-link.prisma — Admin-managed Mosque Invite Links
+//
+// Design notes:
+//  • Shareable invite links (e.g. for QR codes, messaging channels, social).
+//  • Role defaults to MEMBER, can be set to any mosque-scoped role by an admin.
+//  • Only the SHA-256 hash (tokenHash) is stored in the database. The raw token
+//    is returned exactly once upon creation for client-side URL/QR generation.
+//  • Optional maxUses allows limiting total redemptions.
+//  • Optional expiresAt sets expiration timestamp.
+//  • useCount tracks redemptions over time.
+//  • isArchived enables soft-delete / revocation without losing audit history.
+// =============================================================================
+
+model MosqueInviteLink {
+  id          String    @id @default(cuid())
+  mosqueId    String
+  mosque      Mosque    @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  role        Role      @default(MEMBER)
+  tokenHash   String    @unique
+  maxUses     Int?
+  useCount    Int       @default(0)
+  expiresAt   DateTime?
+
+  isArchived  Boolean   @default(false)
+
+  createdById String?
+  createdBy   User?     @relation("InviteLinkCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([mosqueId])
+  @@map("mosque_invite_links")
+}
+

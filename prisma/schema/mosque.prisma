@@ -40,6 +40,7 @@ model Mosque {
   accounts    Account[]
   categories  Category[]
   families    Family[]
+  inviteLinks MosqueInviteLink[]
 
   @@map("mosques")
 }
