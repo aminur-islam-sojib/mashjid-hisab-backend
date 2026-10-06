@@ -11,14 +11,30 @@
 //  • Reusability: Supports optional maxUses (null = unlimited) and optional expiresAt (null = never).
 // ---------------------------------------------------------------------------
 
+import bcrypt from "bcrypt";
+import crypto from "crypto";
 import { prisma } from "../../lib/prisma.js";
+import config from "../../config/index.js";
 import { HttpError } from "../../errors/HttpError.js";
 import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
-import { generateOpaqueToken, hashToken } from "../../utils/token.js";
-import { Role, Prisma } from "../../../generated/prisma/client.js";
+import {
+  generateOpaqueToken,
+  hashToken,
+  signAccessToken,
+  signRefreshToken,
+  tokenExpiresAt,
+} from "../../utils/token.js";
+import { generateSecureTemporaryPassword } from "../membership/membership.service.js";
+import {
+  Role,
+  Prisma,
+  UserStatus,
+  MembershipStatus,
+} from "../../../generated/prisma/client.js";
 import type {
   CreateInviteLinkInput,
   GetMosqueInviteLinksQuery,
+  JoinInviteLinkInput,
 } from "./invite-link.validation.js";
 
 export interface InviteLinkCreatedResponse {
@@ -331,3 +347,319 @@ export async function getPublicInviteLinkInfo(
     mosqueName: inviteLink.mosque.name,
   };
 }
+
+export interface JoinMosqueInviteLinkResult {
+  membership: {
+    id: string;
+    userId: string;
+    mosqueId: string;
+    role: Role;
+    status: MembershipStatus;
+    createdAt: Date;
+    mosque: {
+      id: string;
+      name: string;
+      slug: string;
+    };
+  };
+  user: {
+    id: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+  };
+  isNewUser: boolean;
+  accessToken?: string;
+  refreshToken?: string;
+}
+
+/**
+ * Public Join Flow: POST /api/public/invite-links/:token/join
+ *
+ * Requirements & Guarantees:
+ * 1. Token Re-Validation:
+ *    - Re-validates the token against the database: isActive, unarchived, unexpired, usage under max limit.
+ *    - Re-verifies target mosque is active.
+ *    - Existence-hiding: Throws uniform generic 404 if invalid, expired, revoked, or exhausted.
+ * 2. Self-Service User Resolution:
+ *    - If email/phone matches an existing User: creates/reactivates Membership(ACTIVE) directly.
+ *    - If no existing User matches: creates User + Profile + Membership(ACTIVE) in one atomic transaction.
+ * 3. Usage Counting:
+ *    - Atomically increments `useCount` by 1.
+ * 4. Multi-Tenant Guard:
+ *    - Throws 409 conflict if user is already an ACTIVE member of the mosque.
+ * 5. Session Establishment:
+ *    - Generates session tokens (access token & refresh token) for new registrations or verified existing sessions.
+ *
+ * @param rawToken - 64-character raw hex token from URL
+ * @param input - Validated join input (name, email, phone, password, locale)
+ * @param callerUserId - Optional userId if caller is already authenticated
+ * @param meta - Request metadata (userAgent, ipAddress)
+ */
+export async function joinMosqueByInviteLink(
+  rawToken: string,
+  input: JoinInviteLinkInput,
+  callerUserId?: string,
+  meta: { userAgent?: string; ipAddress?: string } = {},
+): Promise<JoinMosqueInviteLinkResult> {
+  const tokenHash = hashToken(rawToken);
+
+  const trimmedEmail = input.email ? input.email.trim().toLowerCase() : undefined;
+  const trimmedPhone = input.phone ? input.phone.trim() : undefined;
+
+  // 1. Pre-flight check to see if user exists before opening transaction
+  let preExistingUser = null;
+  if (callerUserId) {
+    preExistingUser = await prisma.user.findUnique({
+      where: { id: callerUserId },
+    });
+  }
+
+  if (!preExistingUser) {
+    if (trimmedEmail && trimmedPhone) {
+      const [uEmail, uPhone] = await Promise.all([
+        prisma.user.findUnique({ where: { email: trimmedEmail } }),
+        prisma.user.findUnique({ where: { phone: trimmedPhone } }),
+      ]);
+      if (uEmail && uPhone && uEmail.id !== uPhone.id) {
+        throw HttpError.conflict(
+          "Email and phone number belong to different existing accounts.",
+          "CONTACT_ACCOUNT_MISMATCH",
+        );
+      }
+      preExistingUser = uEmail || uPhone;
+    } else if (trimmedEmail) {
+      preExistingUser = await prisma.user.findUnique({
+        where: { email: trimmedEmail },
+      });
+    } else if (trimmedPhone) {
+      preExistingUser = await prisma.user.findUnique({
+        where: { phone: trimmedPhone },
+      });
+    }
+  }
+
+  // 2. Prepare password hash for new user registration (CPU-intensive, keep outside tx)
+  let preparedPasswordHash: string | null = null;
+  if (!preExistingUser) {
+    const rawPassword = input.password?.trim()
+      ? input.password
+      : generateSecureTemporaryPassword(12);
+    preparedPasswordHash = await bcrypt.hash(rawPassword, config.BCRYPT_ROUNDS);
+  }
+
+  // 3. Atomic Database Transaction
+  const result = await prisma.$transaction(async (tx) => {
+    // 3a. Re-validate token inside transaction
+    const inviteLink = await tx.mosqueInviteLink.findUnique({
+      where: { tokenHash },
+      include: {
+        mosque: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            isArchived: true,
+          },
+        },
+      },
+    });
+
+    if (!inviteLink || inviteLink.mosque.isArchived || !isInviteLinkUsable(inviteLink)) {
+      throw HttpError.notFound(
+        "Invite link not found or has expired.",
+        "INVITE_LINK_NOT_FOUND",
+      );
+    }
+
+    // 3b. Resolve user (re-check inside tx)
+    let targetUser: {
+      id: string;
+      name: string;
+      email: string | null;
+      phone: string | null;
+      sessionVersion: number;
+      passwordHash: string;
+    };
+    let isNewUser = false;
+
+    let existingUser = preExistingUser
+      ? await tx.user.findUnique({ where: { id: preExistingUser.id } })
+      : null;
+
+    if (!existingUser) {
+      if (trimmedEmail && trimmedPhone) {
+        const [uEmail, uPhone] = await Promise.all([
+          tx.user.findUnique({ where: { email: trimmedEmail } }),
+          tx.user.findUnique({ where: { phone: trimmedPhone } }),
+        ]);
+        if (uEmail && uPhone && uEmail.id !== uPhone.id) {
+          throw HttpError.conflict(
+            "Email and phone number belong to different existing accounts.",
+            "CONTACT_ACCOUNT_MISMATCH",
+          );
+        }
+        existingUser = uEmail || uPhone;
+      } else if (trimmedEmail) {
+        existingUser = await tx.user.findUnique({
+          where: { email: trimmedEmail },
+        });
+      } else if (trimmedPhone) {
+        existingUser = await tx.user.findUnique({
+          where: { phone: trimmedPhone },
+        });
+      }
+    }
+
+    if (existingUser) {
+      targetUser = existingUser;
+    } else {
+      isNewUser = true;
+      const finalName =
+        input.name?.trim() ||
+        (trimmedEmail ? trimmedEmail.split("@")[0]! : `Member-${(trimmedPhone || "").slice(-4)}`);
+
+      const createdUser = await tx.user.create({
+        data: {
+          name: finalName,
+          email: trimmedEmail ?? null,
+          phone: trimmedPhone ?? null,
+          passwordHash: preparedPasswordHash!,
+          status: UserStatus.ACTIVE,
+          emailVerified: false,
+          sessionVersion: 1,
+          locale: input.locale ?? "bn",
+          profile: {
+            create: {},
+          },
+        },
+      });
+
+      targetUser = createdUser;
+    }
+
+    // 3c. Check existing membership
+    const existingMembership = await tx.membership.findUnique({
+      where: {
+        userId_mosqueId: {
+          userId: targetUser.id,
+          mosqueId: inviteLink.mosqueId,
+        },
+      },
+    });
+
+    if (existingMembership?.status === MembershipStatus.ACTIVE) {
+      throw HttpError.conflict(
+        "You are already an active member of this mosque.",
+        "ALREADY_MEMBER",
+      );
+    }
+
+    let membership;
+    if (existingMembership) {
+      membership = await tx.membership.update({
+        where: { id: existingMembership.id },
+        data: {
+          role: inviteLink.role,
+          status: MembershipStatus.ACTIVE,
+          invitedById: inviteLink.createdById ?? existingMembership.invitedById,
+        },
+        include: {
+          mosque: {
+            select: { id: true, name: true, slug: true },
+          },
+        },
+      });
+    } else {
+      membership = await tx.membership.create({
+        data: {
+          userId: targetUser.id,
+          mosqueId: inviteLink.mosqueId,
+          role: inviteLink.role,
+          status: MembershipStatus.ACTIVE,
+          invitedById: inviteLink.createdById ?? null,
+        },
+        include: {
+          mosque: {
+            select: { id: true, name: true, slug: true },
+          },
+        },
+      });
+    }
+
+    // 3d. Increment useCount
+    await tx.mosqueInviteLink.update({
+      where: { id: inviteLink.id },
+      data: {
+        useCount: { increment: 1 },
+      },
+    });
+
+    // 3e. Session token creation
+    let accessToken: string | undefined;
+    let refreshToken: string | undefined;
+
+    const shouldIssueSession =
+      isNewUser ||
+      callerUserId === targetUser.id ||
+      (Boolean(input.password) && (await bcrypt.compare(input.password!, targetUser.passwordHash)));
+
+    if (shouldIssueSession) {
+      const jti = crypto.randomUUID();
+      accessToken = signAccessToken({
+        sub: targetUser.id,
+        mosqueId: membership.mosqueId,
+        role: membership.role,
+        sessionVersion: targetUser.sessionVersion,
+      });
+
+      const rawRefreshJwt = signRefreshToken({
+        sub: targetUser.id,
+        jti,
+        mosqueId: membership.mosqueId,
+        role: membership.role,
+        sessionVersion: targetUser.sessionVersion,
+      });
+
+      const refreshHash = hashToken(rawRefreshJwt);
+
+      await tx.refreshToken.create({
+        data: {
+          userId: targetUser.id,
+          tokenHash: refreshHash,
+          mosqueId: membership.mosqueId,
+          role: membership.role,
+          expiresAt: tokenExpiresAt(config.JWT_REFRESH_EXPIRES_IN_MS),
+          userAgent: meta.userAgent,
+          ipAddress: meta.ipAddress,
+        },
+      });
+
+      refreshToken = rawRefreshJwt;
+    }
+
+    return {
+      membership: {
+        id: membership.id,
+        userId: membership.userId,
+        mosqueId: membership.mosqueId,
+        role: membership.role,
+        status: membership.status,
+        createdAt: membership.createdAt,
+        mosque: membership.mosque,
+      },
+      user: {
+        id: targetUser.id,
+        name: targetUser.name,
+        email: targetUser.email,
+        phone: targetUser.phone,
+      },
+      isNewUser,
+      accessToken,
+      refreshToken,
+    };
+  });
+
+  return result;
+}
+

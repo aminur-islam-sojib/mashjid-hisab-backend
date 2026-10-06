@@ -3,7 +3,10 @@
 // ---------------------------------------------------------------------------
 
 import { Router } from "express";
-import { authenticate } from "../../middlewares/auth.middleware.js";
+import {
+  authenticate,
+  optionalAuthenticate,
+} from "../../middlewares/auth.middleware.js";
 import {
   requireMosqueMembership,
   ADMIN_ONLY_ROLES,
@@ -13,6 +16,7 @@ import {
   getMosqueInviteLinksHandler,
   revokeInviteLinkHandler,
   getPublicInviteLinkInfoHandler,
+  joinMosqueByInviteLinkHandler,
 } from "./invite-link.controller.js";
 
 const inviteLinkRouter: Router = Router({ mergeParams: true });
@@ -73,5 +77,20 @@ export const publicInviteLinkRouter: Router = Router();
  * Existence-hiding: Returns a generic 404 for invalid/expired/exhausted/revoked tokens.
  */
 publicInviteLinkRouter.get("/:token", getPublicInviteLinkInfoHandler);
+
+/**
+ * POST /api/public/invite-links/:token/join
+ * Access: Public (unauthenticated, or optionally authenticated)
+ *
+ * Self-service registration & joining flow:
+ * - If email/phone matches an existing User: creates/reactivates Membership(ACTIVE) directly
+ * - Otherwise: creates User + Profile + Membership(ACTIVE) in one step
+ * - Increments useCount
+ */
+publicInviteLinkRouter.post(
+  "/:token/join",
+  optionalAuthenticate,
+  joinMosqueByInviteLinkHandler,
+);
 
 export default inviteLinkRouter;

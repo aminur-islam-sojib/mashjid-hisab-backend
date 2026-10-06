@@ -7,16 +7,22 @@ import { catchAsync } from "../../utils/catchAsync.js";
 import { sendResponse } from "../../utils/sendResponse.js";
 import { validateMosqueIdParam } from "../mosque/mosque.validation.js";
 import {
+  setAccessTokenCookie,
+  setRefreshTokenCookie,
+} from "../../utils/cookie.js";
+import {
   validateCreateInviteLinkInput,
   validateGetMosqueInviteLinksQuery,
   validateInviteLinkIdParam,
   validateInviteTokenParam,
+  validateJoinInviteLinkInput,
 } from "./invite-link.validation.js";
 import {
   createInviteLink,
   getMosqueInviteLinks,
   revokeInviteLink,
   getPublicInviteLinkInfo,
+  joinMosqueByInviteLink,
 } from "./invite-link.service.js";
 
 /**
@@ -105,6 +111,50 @@ export const getPublicInviteLinkInfoHandler = catchAsync(
       statusCode: 200,
       message: "Invite link verified successfully.",
       data: info,
+    });
+  },
+);
+
+/**
+ * POST /api/public/invite-links/:token/join
+ * Access: Public (unauthenticated, or optionally authenticated)
+ *
+ * Re-validates the token, then:
+ * - If email/phone matches an existing User: creates/reactivates Membership(ACTIVE) directly
+ * - Otherwise: creates User + Profile + Membership(ACTIVE) in one step
+ * - Increments useCount
+ */
+export const joinMosqueByInviteLinkHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const token = validateInviteTokenParam(req.params["token"]);
+    const input = validateJoinInviteLinkInput(req.body);
+    const callerUserId = req.user?.sub;
+    const meta = {
+      userAgent: req.headers["user-agent"],
+      ipAddress: req.ip,
+    };
+
+    const result = await joinMosqueByInviteLink(token, input, callerUserId, meta);
+
+    // Set auth cookies if session tokens were generated
+    if (result.accessToken) {
+      setAccessTokenCookie(res, result.accessToken);
+    }
+    if (result.refreshToken) {
+      setRefreshTokenCookie(res, result.refreshToken);
+    }
+
+    sendResponse(res, {
+      statusCode: result.isNewUser ? 201 : 200,
+      message: result.isNewUser
+        ? "Account created and joined mosque successfully."
+        : "Successfully joined mosque.",
+      data: {
+        membership: result.membership,
+        user: result.user,
+        isNewUser: result.isNewUser,
+        ...(result.accessToken ? { accessToken: result.accessToken } : {}),
+      },
     });
   },
 );

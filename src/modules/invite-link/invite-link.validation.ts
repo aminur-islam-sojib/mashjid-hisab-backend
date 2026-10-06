@@ -5,6 +5,9 @@
 import { HttpError, type ValidationIssue } from "../../errors/HttpError.js";
 import { Role } from "../../../generated/prisma/client.js";
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PHONE_RE = /^\+?[0-9]{7,15}$/;
+
 export interface CreateInviteLinkInput {
   role?: Role;
   maxUses?: number | null;
@@ -159,6 +162,109 @@ export function validateGetMosqueInviteLinksQuery(
   }
 
   return result;
+}
+
+export interface JoinInviteLinkInput {
+  name?: string;
+  email?: string;
+  phone?: string;
+  password?: string;
+  locale?: string;
+}
+
+/**
+ * Validates request payload for POST /api/public/invite-links/:token/join
+ *
+ * Rules:
+ * - At least one contact method (email or phone) is required.
+ * - email: optional valid email string.
+ * - phone: optional valid phone string (7-15 digits, optional leading +).
+ * - name: optional string (2-100 characters if supplied).
+ * - password: optional string (at least 8 characters if supplied).
+ * - locale: optional locale tag (e.g. "bn", "en").
+ */
+export function validateJoinInviteLinkInput(body: unknown): JoinInviteLinkInput {
+  if (!body || typeof body !== "object") {
+    throw HttpError.badRequest("Request body must be a JSON object.");
+  }
+
+  const raw = body as Record<string, unknown>;
+  const issues: ValidationIssue[] = [];
+  const input: JoinInviteLinkInput = {};
+
+  // -- email (optional) ------------------------------------------------------
+  if (raw["email"] !== undefined && raw["email"] !== null && raw["email"] !== "") {
+    if (typeof raw["email"] !== "string") {
+      issues.push({ field: "email", issue: "Email must be a string." });
+    } else {
+      const email = raw["email"].trim().toLowerCase();
+      if (!EMAIL_RE.test(email)) {
+        issues.push({ field: "email", issue: "Must be a valid email address." });
+      } else {
+        input.email = email;
+      }
+    }
+  }
+
+  // -- phone (optional) ------------------------------------------------------
+  if (raw["phone"] !== undefined && raw["phone"] !== null && raw["phone"] !== "") {
+    const rawPhone = String(raw["phone"]).trim();
+    if (!PHONE_RE.test(rawPhone)) {
+      issues.push({
+        field: "phone",
+        issue: "Must be a valid phone number (7–15 digits, optional leading +).",
+      });
+    } else {
+      input.phone = rawPhone;
+    }
+  }
+
+  // At least one contact method must be provided
+  if (!input.email && !input.phone) {
+    issues.push({
+      field: "contact",
+      issue: "At least one contact method (email or phone) is required to join.",
+    });
+  }
+
+  // -- name (optional) -------------------------------------------------------
+  if (raw["name"] !== undefined && raw["name"] !== null && raw["name"] !== "") {
+    if (typeof raw["name"] !== "string") {
+      issues.push({ field: "name", issue: "Name must be a string." });
+    } else {
+      const name = raw["name"].trim();
+      if (name.length < 2 || name.length > 100) {
+        issues.push({ field: "name", issue: "Name must be between 2 and 100 characters." });
+      } else {
+        input.name = name;
+      }
+    }
+  }
+
+  // -- password (optional) ---------------------------------------------------
+  if (raw["password"] !== undefined && raw["password"] !== null && raw["password"] !== "") {
+    if (typeof raw["password"] !== "string") {
+      issues.push({ field: "password", issue: "Password must be a string." });
+    } else {
+      const password = raw["password"];
+      if (password.length < 8) {
+        issues.push({ field: "password", issue: "Must be at least 8 characters." });
+      } else {
+        input.password = password;
+      }
+    }
+  }
+
+  // -- locale (optional) -----------------------------------------------------
+  if (raw["locale"] !== undefined && raw["locale"] !== null && raw["locale"] !== "") {
+    input.locale = typeof raw["locale"] === "string" ? raw["locale"].trim() : "bn";
+  }
+
+  if (issues.length > 0) {
+    throw HttpError.validationError(issues);
+  }
+
+  return input;
 }
 
 
