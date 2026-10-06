@@ -63,6 +63,12 @@ model Expense {
   voidedBy           User?         @relation("ExpenseVoider", fields: [voidedById], references: [id], onDelete: SetNull)
   voidedAt           DateTime?
 
+  // Rejection lifecycle & audit trail
+  rejectionReason    String?
+  rejectedById       String?
+  rejectedBy         User?         @relation("ExpenseRejecter", fields: [rejectedById], references: [id], onDelete: SetNull)
+  rejectedAt         DateTime?
+
   // Reversal linkage (for voided entries and their offsetting reversals)
   reversalOfId       String?       @unique
   reversalOf         Expense?      @relation("ExpenseReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)

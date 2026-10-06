@@ -15,6 +15,7 @@ import inviteLinkRouter from "../invite-link/invite-link.routes.js";
 import donationRouter from "../donation/donation.routes.js";
 import expenseRouter from "../expense/expense.routes.js";
 import transferRouter from "../transfer/transfer.routes.js";
+import transactionRouter from "../transaction/transaction.routes.js";
 import {
   createMosqueHandler,
   getUserMosquesHandler,
@@ -88,6 +89,12 @@ mosqueRouter.use("/:mosqueId/expenses", expenseRouter);
  * Delegated to Transfer Router (account & fund transfers)
  */
 mosqueRouter.use("/:mosqueId/transfers", transferRouter);
+
+/**
+ * /api/mosques/:mosqueId/transactions
+ * Delegated to Transaction Router (unified ledger & approvals)
+ */
+mosqueRouter.use("/:mosqueId/transactions", transactionRouter);
 
 /**
  * GET /api/mosques/:mosqueId
