@@ -75,3 +75,4 @@ model Pledge {
   @@index([dueDate])
   @@map("pledges")
 }
+

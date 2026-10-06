@@ -405,3 +405,4 @@ export function validatePledgeIdParam(param: unknown): string {
   }
   return param.trim();
 }
+
