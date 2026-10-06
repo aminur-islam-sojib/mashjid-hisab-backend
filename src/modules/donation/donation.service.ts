@@ -18,6 +18,7 @@ import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
 import type {
   CreateDonationInput,
   GetMosqueDonationsQueryInput,
+  UpdateDonationInput,
 } from "./donation.validation.js";
 
 export interface DonationActor {
@@ -864,3 +865,81 @@ export async function voidDonation(
 
   return mapDonationResponse(updated);
 }
+
+/**
+ * Updates non-financial fields on an existing donation entry.
+ *
+ * Rules & Guarantees:
+ *  - Only MOSQUE_ADMIN and TREASURER can perform updates.
+ *  - Financial fields (amount, fund, account, date, category) are rejected by validation with TRANSACTION_IMMUTABLE.
+ *  - Cannot edit a voided donation (frozen for audit compliance).
+ *  - Returns updated donation record with full relations.
+ */
+export async function updateDonation(
+  mosqueId: string,
+  donationId: string,
+  input: UpdateDonationInput,
+  actor: DonationActor,
+): Promise<DonationResponseItem> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  // Financial operator role guard (MOSQUE_ADMIN, TREASURER)
+  const isFinancialOperator =
+    actor.role === Role.MOSQUE_ADMIN || actor.role === Role.TREASURER;
+  if (!isFinancialOperator) {
+    throw HttpError.forbidden(
+      `Access denied. Role '${actor.role}' cannot modify donation records.`,
+      "FORBIDDEN_ROLE",
+    );
+  }
+
+  const donation = await prisma.donation.findFirst({
+    where: {
+      id: donationId,
+      mosqueId: resolvedMosqueId,
+    },
+  });
+
+  if (!donation) {
+    throw HttpError.notFound("Donation record not found.", "DONATION_NOT_FOUND");
+  }
+
+  // Voided donations cannot be edited
+  if (donation.status === DonationStatus.VOIDED) {
+    throw HttpError.badRequest(
+      "Cannot edit a voided donation. Voided records are permanently frozen for audit compliance.",
+      "DONATION_VOIDED",
+    );
+  }
+
+  const dataToUpdate: Prisma.DonationUpdateInput = {};
+  if (input.notes !== undefined) dataToUpdate.notes = input.notes;
+  if (input.donorName !== undefined) dataToUpdate.donorName = input.donorName;
+  if (input.donorPhone !== undefined) dataToUpdate.donorPhone = input.donorPhone;
+  if (input.donorEmail !== undefined) dataToUpdate.donorEmail = input.donorEmail;
+  if (input.attachments !== undefined) dataToUpdate.attachments = input.attachments;
+  if (input.isAnonymousPublic !== undefined) dataToUpdate.isAnonymousPublic = input.isAnonymousPublic;
+
+  const updated = await prisma.donation.update({
+    where: { id: donationId },
+    data: dataToUpdate,
+    include: {
+      account: { select: { id: true, name: true, type: true, accountNumber: true } },
+      fund: { select: { id: true, name: true, type: true, isRestricted: true } },
+      category: { select: { id: true, name: true, type: true } },
+      member: {
+        select: {
+          id: true,
+          user: { select: { id: true, name: true, email: true, phone: true } },
+        },
+      },
+      family: { select: { id: true, name: true } },
+      createdBy: { select: { id: true, name: true } },
+      postedBy: { select: { id: true, name: true } },
+      voidedBy: { select: { id: true, name: true, email: true } },
+    },
+  });
+
+  return mapDonationResponse(updated);
+}
+

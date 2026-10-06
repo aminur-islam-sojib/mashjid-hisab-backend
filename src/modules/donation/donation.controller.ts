@@ -12,12 +12,14 @@ import {
   validateCreateDonationInput,
   validateDonationIdParam,
   validateGetMosqueDonationsQuery,
+  validateUpdateDonationInput,
 } from "./donation.validation.js";
 import {
   createDonation,
   getDonationById,
   getMosqueDonations,
   voidDonation,
+  updateDonation,
 } from "./donation.service.js";
 
 /**
@@ -166,4 +168,40 @@ export const voidDonationHandler = catchAsync(
     });
   },
 );
+
+/**
+ * PATCH /api/mosques/:mosqueId/donations/:donationId AND PATCH /api/donations/:id
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER
+ *
+ * Edits only non-financial fields (notes, donor name, attachments).
+ * Financial fields (amount, fund, account, date) are rejected with TRANSACTION_IMMUTABLE.
+ */
+export const updateDonationHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId =
+      req.mosqueId ||
+      (req.params["mosqueId"] ? validateMosqueIdParam(req.params["mosqueId"]) : undefined) ||
+      (typeof req.body?.mosqueId === "string" ? validateMosqueIdParam(req.body.mosqueId) : undefined);
+
+    if (!mosqueId) {
+      throw HttpError.badRequest("Mosque ID is required.", "MISSING_MOSQUE_ID");
+    }
+
+    const donationId = validateDonationIdParam(req.params["donationId"] || req.params["id"]);
+    const input = validateUpdateDonationInput(req.body);
+
+    const donation = await updateDonation(mosqueId, donationId, input, {
+      userId: req.user!.sub,
+      role: req.membership!.role,
+      membershipId: req.membership?.id,
+    });
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Donation updated successfully.",
+      data: donation,
+    });
+  },
+);
+
 

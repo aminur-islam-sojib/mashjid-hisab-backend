@@ -15,6 +15,7 @@ import {
   getDonationByIdHandler,
   getMosqueDonationsHandler,
   voidDonationHandler,
+  updateDonationHandler,
 } from "./donation.controller.js";
 
 const donationRouter: Router = Router({ mergeParams: true });
@@ -56,6 +57,20 @@ donationRouter.get(
   authenticate,
   requireMosqueMembership(),
   getDonationByIdHandler,
+);
+
+/**
+ * PATCH /api/mosques/:mosqueId/donations/:donationId AND PATCH /api/donations/:id
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER
+ *
+ * Edits only non-financial fields (notes, donor name, attachments).
+ * Financial fields (amount, fund, account, date) are rejected with TRANSACTION_IMMUTABLE.
+ */
+donationRouter.patch(
+  "/:donationId",
+  authenticate,
+  requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
+  updateDonationHandler,
 );
 
 /**

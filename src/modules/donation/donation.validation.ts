@@ -517,3 +517,173 @@ export function validateVoidDonationInput(body: unknown): VoidDonationInput {
   return { reason };
 }
 
+export interface UpdateDonationInput {
+  notes?: string | null;
+  donorName?: string | null;
+  donorPhone?: string | null;
+  donorEmail?: string | null;
+  attachments?: string[];
+  isAnonymousPublic?: boolean;
+}
+
+const IMMUTABLE_FINANCIAL_FIELDS = [
+  "amount",
+  "fundId",
+  "fund",
+  "accountId",
+  "account",
+  "categoryId",
+  "category",
+  "date",
+  "receiptNumber",
+  "status",
+] as const;
+
+/**
+ * Validates request payload for PATCH /api/mosques/:mosqueId/donations/:donationId
+ *
+ * Rules:
+ *  - Only non-financial fields are editable: notes, donorName, donorPhone, donorEmail, attachments, isAnonymousPublic.
+ *  - Financial fields (amount, fund, account, category, date, receiptNumber, status) are strictly rejected
+ *    with 400 Bad Request and error code 'TRANSACTION_IMMUTABLE'.
+ *  - At least one field must be provided.
+ */
+export function validateUpdateDonationInput(body: unknown): UpdateDonationInput {
+  if (!body || typeof body !== "object") {
+    throw HttpError.badRequest("Request body must be a JSON object.");
+  }
+
+  const raw = body as Record<string, unknown>;
+
+  // 1. Strict immutability check
+  for (const field of IMMUTABLE_FINANCIAL_FIELDS) {
+    if (raw[field] !== undefined) {
+      throw HttpError.badRequest(
+        "Financial fields (amount, fund, account, date, category) cannot be modified on recorded donations. Void and recreate the entry if a financial correction is needed.",
+        "TRANSACTION_IMMUTABLE",
+      );
+    }
+  }
+
+  const issues: ValidationIssue[] = [];
+  const result: UpdateDonationInput = {};
+  let hasFields = false;
+
+  // -- notes / note
+  const notesVal = raw["notes"] ?? raw["note"];
+  if (notesVal !== undefined) {
+    hasFields = true;
+    if (notesVal === null || notesVal === "") {
+      result.notes = null;
+    } else if (typeof notesVal !== "string") {
+      issues.push({ field: "notes", issue: "Notes must be a string or null." });
+    } else {
+      const trimmed = notesVal.trim();
+      if (trimmed.length > 500) {
+        issues.push({ field: "notes", issue: "Notes cannot exceed 500 characters." });
+      } else {
+        result.notes = trimmed || null;
+      }
+    }
+  }
+
+  // -- donorName / donor_name / name
+  const donorNameVal = raw["donorName"] ?? raw["donor_name"] ?? raw["name"];
+  if (donorNameVal !== undefined) {
+    hasFields = true;
+    if (donorNameVal === null || donorNameVal === "") {
+      result.donorName = null;
+    } else if (typeof donorNameVal !== "string") {
+      issues.push({ field: "donorName", issue: "Donor name must be a string or null." });
+    } else {
+      const trimmed = donorNameVal.trim();
+      if (trimmed.length > 100) {
+        issues.push({ field: "donorName", issue: "Donor name cannot exceed 100 characters." });
+      } else {
+        result.donorName = trimmed || null;
+      }
+    }
+  }
+
+  // -- donorPhone
+  if (raw["donorPhone"] !== undefined) {
+    hasFields = true;
+    if (raw["donorPhone"] === null || raw["donorPhone"] === "") {
+      result.donorPhone = null;
+    } else if (typeof raw["donorPhone"] !== "string") {
+      issues.push({ field: "donorPhone", issue: "Donor phone must be a string or null." });
+    } else {
+      const trimmed = raw["donorPhone"].trim();
+      if (trimmed.length > 30) {
+        issues.push({ field: "donorPhone", issue: "Donor phone cannot exceed 30 characters." });
+      } else {
+        result.donorPhone = trimmed || null;
+      }
+    }
+  }
+
+  // -- donorEmail
+  if (raw["donorEmail"] !== undefined) {
+    hasFields = true;
+    if (raw["donorEmail"] === null || raw["donorEmail"] === "") {
+      result.donorEmail = null;
+    } else if (typeof raw["donorEmail"] !== "string") {
+      issues.push({ field: "donorEmail", issue: "Donor email must be a string or null." });
+    } else {
+      const trimmed = raw["donorEmail"].trim().toLowerCase();
+      if (!EMAIL_REGEX.test(trimmed)) {
+        issues.push({ field: "donorEmail", issue: "Invalid donor email address format." });
+      } else {
+        result.donorEmail = trimmed;
+      }
+    }
+  }
+
+  // -- attachments
+  if (raw["attachments"] !== undefined) {
+    hasFields = true;
+    if (!Array.isArray(raw["attachments"])) {
+      issues.push({ field: "attachments", issue: "Attachments must be an array of string URLs." });
+    } else {
+      const cleaned: string[] = [];
+      for (let i = 0; i < raw["attachments"].length; i++) {
+        const item = raw["attachments"][i];
+        if (typeof item !== "string" || !item.trim()) {
+          issues.push({ field: `attachments[${i}]`, issue: "Attachment item must be a non-empty string." });
+        } else {
+          cleaned.push(item.trim());
+        }
+      }
+      result.attachments = cleaned;
+    }
+  }
+
+  // -- isAnonymousPublic
+  if (raw["isAnonymousPublic"] !== undefined) {
+    hasFields = true;
+    if (typeof raw["isAnonymousPublic"] === "boolean") {
+      result.isAnonymousPublic = raw["isAnonymousPublic"];
+    } else if (raw["isAnonymousPublic"] === "true") {
+      result.isAnonymousPublic = true;
+    } else if (raw["isAnonymousPublic"] === "false") {
+      result.isAnonymousPublic = false;
+    } else {
+      issues.push({ field: "isAnonymousPublic", issue: "isAnonymousPublic must be a boolean." });
+    }
+  }
+
+  if (issues.length > 0) {
+    throw HttpError.validationError(issues);
+  }
+
+  if (!hasFields) {
+    throw HttpError.badRequest(
+      "At least one non-financial field must be provided to update (notes, donorName, donorPhone, donorEmail, attachments, isAnonymousPublic).",
+      "EMPTY_UPDATE_PAYLOAD",
+    );
+  }
+
+  return result;
+}
+
+
