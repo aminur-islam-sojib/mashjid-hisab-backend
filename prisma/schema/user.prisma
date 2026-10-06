@@ -69,6 +69,8 @@ model User {
   cancelledPledges        Pledge[]              @relation("PledgeCanceller")
   createdChandaPlans      ChandaPlan[]          @relation("ChandaPlanCreator")
   waivedDues              Due[]                 @relation("DueWaiver")
+  countedCollections      CollectionSession[]   @relation("CollectionCounter")
+  verifiedCollections     CollectionSession[]   @relation("CollectionVerifier")
 
   @@map("users")
 }

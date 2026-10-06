@@ -1,0 +1,64 @@
+// =============================================================================
+// collection.prisma — Domain 8: Collection Sessions (Jummah box, Eid, Taraweeh)
+//
+// Design notes:
+//  • Starts an in-person physical counting session: occasion, date, totalAmount, note.
+//  • Initial status is OPEN.
+//  • Verification must be done by a second person (ADMIN or TREAS), not the original counter.
+//  • Upon verification, an anonymous income Donation is atomically posted to the chosen
+//    fund and account, and linked to this collection session.
+// =============================================================================
+
+model CollectionSession {
+  id              String            @id @default(cuid())
+  mosqueId        String
+  mosque          Mosque            @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  // Occasion description, e.g. "JUMMAH", "EID_UL_FITR", "EID_UL_ADHA", "TARAWEEH", "JANAZAH", etc.
+  occasion        String
+
+  // Date of collection / counting
+  date            DateTime
+
+  // Counted total amount in minor units (poisha), strictly positive BigInt
+  totalAmount     BigInt
+
+  notes           String?
+
+  status          CollectionStatus  @default(OPEN)
+
+  // Target finance entities
+  fundId          String?
+  fund            Fund?             @relation(fields: [fundId], references: [id], onDelete: Restrict)
+
+  accountId       String?
+  account         Account?          @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  categoryId      String?
+  category        Category?         @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  // The counter (creator)
+  createdById     String
+  createdBy       User              @relation("CollectionCounter", fields: [createdById], references: [id], onDelete: Restrict)
+
+  // The verifier (second person, distinct from counter)
+  verifiedById    String?
+  verifiedBy      User?             @relation("CollectionVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
+  verifiedAt      DateTime?
+
+  // Posted ledger donation entry upon verification
+  donationId      String?           @unique
+  donation        Donation?         @relation("CollectionSessionDonation", fields: [donationId], references: [id], onDelete: SetNull)
+
+  // Rejection note if discarded
+  rejectionReason String?
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([mosqueId])
+  @@index([status])
+  @@index([date])
+  @@map("collection_sessions")
+}
+

@@ -35,8 +35,9 @@ model Fund {
   transfers    Transfer[]
   campaigns    Campaign[]
   pledges      Pledge[]
-  chandaPlans  ChandaPlan[]
-  dues         Due[]
+  chandaPlans        ChandaPlan[]
+  dues               Due[]
+  collectionSessions CollectionSession[]
 
   @@unique([mosqueId, name])
   @@index([mosqueId])
@@ -64,7 +65,8 @@ model Account {
 
   donations      Donation[]
   expenses       Expense[]
-  transfers      Transfer[]
+  transfers          Transfer[]
+  collectionSessions CollectionSession[]
 
   @@unique([mosqueId, name])
   @@index([mosqueId])
@@ -90,7 +92,8 @@ model Category {
   updatedAt  DateTime     @updatedAt
 
   donations  Donation[]
-  expenses   Expense[]
+  expenses           Expense[]
+  collectionSessions CollectionSession[]
 
   @@unique([mosqueId, name, type])
   @@index([mosqueId])

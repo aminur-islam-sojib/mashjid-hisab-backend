@@ -50,10 +50,11 @@ model Mosque {
   donations   Donation[]
   expenses    Expense[]
   transfers   Transfer[]
-  campaigns   Campaign[]
-  pledges     Pledge[]
-  chandaPlans ChandaPlan[]
-  dues        Due[]
+  campaigns          Campaign[]
+  pledges            Pledge[]
+  chandaPlans        ChandaPlan[]
+  dues               Due[]
+  collectionSessions CollectionSession[]
 
   @@map("mosques")
 }

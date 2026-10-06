@@ -201,3 +201,13 @@ enum DueStatus {
   PAID
   WAIVED
 }
+
+// ---------------------------------------------------------------------------
+// CollectionStatus
+// Lifecycle of an in-person collection counting session (Jummah, Eid, etc.).
+// ---------------------------------------------------------------------------
+enum CollectionStatus {
+  OPEN
+  VERIFIED
+  REJECTED
+}
