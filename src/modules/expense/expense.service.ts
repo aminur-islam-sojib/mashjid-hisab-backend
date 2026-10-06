@@ -18,6 +18,7 @@ import { isDateInClosedPeriod } from "../donation/donation.service.js";
 import type {
   CreateExpenseInput,
   GetMosqueExpensesQueryInput,
+  UpdateExpenseInput,
 } from "./expense.validation.js";
 
 export interface ExpenseActor {
@@ -893,5 +894,66 @@ export async function getExpenseById(
 
   return mapExpenseResponse(expense);
 }
+
+/**
+ * Updates non-financial fields on an existing expense entry (notes, payee, attachments).
+ *
+ * Rules & Guarantees:
+ *  - Only MOSQUE_ADMIN and TREASURER can perform updates (FINANCIAL_OPERATOR_ROLES).
+ *  - Financial fields (amount, fund, account, date, category, voucher) are rejected by validation with TRANSACTION_IMMUTABLE.
+ *  - Cannot edit a voided expense (frozen for audit compliance).
+ *  - Returns updated expense record with full relations and approval trail.
+ */
+export async function updateExpense(
+  mosqueId: string,
+  expenseId: string,
+  input: UpdateExpenseInput,
+  actor: ExpenseActor,
+): Promise<ExpenseResponseItem> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  // Financial operator role guard (MOSQUE_ADMIN, TREASURER)
+  const isFinancialOperator =
+    actor.role === Role.MOSQUE_ADMIN || actor.role === Role.TREASURER;
+  if (!isFinancialOperator) {
+    throw HttpError.forbidden(
+      `Access denied. Role '${actor.role}' cannot modify expense records.`,
+      "FORBIDDEN_ROLE",
+    );
+  }
+
+  const expense = await prisma.expense.findFirst({
+    where: {
+      id: expenseId,
+      mosqueId: resolvedMosqueId,
+    },
+  });
+
+  if (!expense) {
+    throw HttpError.notFound("Expense record not found in this mosque.", "EXPENSE_NOT_FOUND");
+  }
+
+  // Voided expenses cannot be edited
+  if (expense.status === ExpenseStatus.VOIDED) {
+    throw HttpError.badRequest(
+      "Cannot edit a voided expense. Voided records are permanently frozen for audit compliance.",
+      "EXPENSE_VOIDED",
+    );
+  }
+
+  const dataToUpdate: Prisma.ExpenseUpdateInput = {};
+  if (input.notes !== undefined) dataToUpdate.notes = input.notes;
+  if (input.payee !== undefined) dataToUpdate.payee = input.payee;
+  if (input.attachments !== undefined) dataToUpdate.attachments = input.attachments;
+
+  const updated = await prisma.expense.update({
+    where: { id: expenseId },
+    data: dataToUpdate,
+    include: EXPENSE_DEFAULT_INCLUDE,
+  });
+
+  return mapExpenseResponse(updated);
+}
+
 
 

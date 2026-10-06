@@ -8,11 +8,13 @@ import {
   requireMosqueMembership,
   EXPENSE_OPERATOR_ROLES,
   OVERSIGHT_ROLES,
+  FINANCIAL_OPERATOR_ROLES,
 } from "../../middlewares/mosque.middleware.js";
 import {
   createExpenseHandler,
   getMosqueExpensesHandler,
   getExpenseByIdHandler,
+  updateExpenseHandler,
 } from "./expense.controller.js";
 
 const expenseRouter: Router = Router({ mergeParams: true });
@@ -55,6 +57,20 @@ expenseRouter.get(
   authenticate,
   requireMosqueMembership(...OVERSIGHT_ROLES),
   getExpenseByIdHandler,
+);
+
+/**
+ * PATCH /api/mosques/:mosqueId/expenses/:id AND PATCH /api/expenses/:id
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER
+ *
+ * Edits only non-financial fields (notes, payee, attachments).
+ * Financial fields (amount, fund, account, date, category, voucher) are rejected with TRANSACTION_IMMUTABLE.
+ */
+expenseRouter.patch(
+  "/:id",
+  authenticate,
+  requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
+  updateExpenseHandler,
 );
 
 export default expenseRouter;

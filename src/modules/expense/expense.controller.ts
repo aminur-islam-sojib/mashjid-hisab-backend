@@ -12,11 +12,13 @@ import {
   validateCreateExpenseInput,
   validateGetMosqueExpensesQuery,
   validateExpenseIdParam,
+  validateUpdateExpenseInput,
 } from "./expense.validation.js";
 import {
   createExpense,
   getMosqueExpenses,
   getExpenseById,
+  updateExpense,
 } from "./expense.service.js";
 
 /**
@@ -149,5 +151,45 @@ export const getExpenseByIdHandler = catchAsync(
     });
   },
 );
+
+/**
+ * PATCH /api/mosques/:mosqueId/expenses/:id AND PATCH /api/expenses/:id
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER
+ *
+ * Edits only non-financial fields (notes, payee, attachments).
+ * Financial fields (amount, fund, account, date, category, voucher) are rejected with TRANSACTION_IMMUTABLE.
+ */
+export const updateExpenseHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId =
+      req.mosqueId ||
+      (req.params["mosqueId"] ? validateMosqueIdParam(req.params["mosqueId"]) : undefined) ||
+      (typeof req.query["mosqueId"] === "string" ? validateMosqueIdParam(req.query["mosqueId"]) : undefined);
+
+    if (!mosqueId) {
+      throw HttpError.badRequest("Mosque ID is required.", "MISSING_MOSQUE_ID");
+    }
+
+    if (!req.user?.sub || !req.membership?.role) {
+      throw HttpError.forbidden("Access denied.", "MEMBERSHIP_REQUIRED");
+    }
+
+    const expenseId = validateExpenseIdParam(req.params["id"] || req.params["expenseId"]);
+    const input = validateUpdateExpenseInput(req.body);
+
+    const updated = await updateExpense(mosqueId, expenseId, input, {
+      userId: req.user.sub,
+      role: req.membership.role,
+      membershipId: req.membership.id,
+    });
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Expense record updated successfully.",
+      data: updated,
+    });
+  },
+);
+
 
 

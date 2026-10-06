@@ -415,4 +415,151 @@ export function validateGetMosqueExpensesQuery(query: unknown): GetMosqueExpense
   return result;
 }
 
+export interface UpdateExpenseInput {
+  notes?: string | null;
+  payee?: string;
+  attachments?: string[];
+}
+
+const IMMUTABLE_EXPENSE_FIELDS = [
+  "amount",
+  "fundId",
+  "fund",
+  "accountId",
+  "account",
+  "categoryId",
+  "category",
+  "date",
+  "voucherNo",
+  "voucherNumber",
+  "voucher",
+  "status",
+  "reversalOfId",
+] as const;
+
+/**
+ * Validates request payload for PATCH /api/mosques/:mosqueId/expenses/:id and PATCH /api/expenses/:id
+ *
+ * Rules:
+ *  - Only non-financial fields are editable: notes, payee, attachments.
+ *  - Financial/core fields (amount, fund, account, category, date, voucherNo, status) are strictly rejected
+ *    with 400 Bad Request and error code 'TRANSACTION_IMMUTABLE'.
+ *  - At least one editable field must be provided.
+ */
+export function validateUpdateExpenseInput(body: unknown): UpdateExpenseInput {
+  if (!body || typeof body !== "object") {
+    throw HttpError.badRequest("Request body must be a JSON object.");
+  }
+
+  const raw = body as Record<string, unknown>;
+
+  // 1. Strict immutability check
+  for (const field of IMMUTABLE_EXPENSE_FIELDS) {
+    if (raw[field] !== undefined) {
+      throw HttpError.badRequest(
+        "Financial fields (amount, fund, account, date, category, voucher) cannot be modified on recorded expenses. Void and recreate the entry if a financial correction is needed.",
+        "TRANSACTION_IMMUTABLE",
+      );
+    }
+  }
+
+  const issues: ValidationIssue[] = [];
+  const result: UpdateExpenseInput = {};
+  let hasFields = false;
+
+  // -- notes / note / description
+  const notesVal =
+    raw["notes"] !== undefined
+      ? raw["notes"]
+      : raw["note"] !== undefined
+      ? raw["note"]
+      : raw["description"];
+
+  if (notesVal !== undefined) {
+    hasFields = true;
+    if (notesVal === null || notesVal === "") {
+      result.notes = null;
+    } else if (typeof notesVal !== "string") {
+      issues.push({ field: "notes", issue: "Notes must be a string or null." });
+    } else {
+      const trimmed = notesVal.trim();
+      if (trimmed.length > 500) {
+        issues.push({ field: "notes", issue: "Notes cannot exceed 500 characters." });
+      } else {
+        result.notes = trimmed || null;
+      }
+    }
+  }
+
+  // -- payee
+  const payeeVal = raw["payee"];
+  if (payeeVal !== undefined) {
+    hasFields = true;
+    if (typeof payeeVal !== "string") {
+      issues.push({ field: "payee", issue: "Payee must be a string." });
+    } else {
+      const trimmed = payeeVal.trim();
+      if (trimmed.length < 2) {
+        issues.push({ field: "payee", issue: "Payee must be at least 2 characters." });
+      } else if (trimmed.length > 200) {
+        issues.push({ field: "payee", issue: "Payee cannot exceed 200 characters." });
+      } else {
+        result.payee = trimmed;
+      }
+    }
+  }
+
+  // -- attachments / attachment / billPhoto
+  const rawAttachments = raw["attachments"];
+  const rawAttachment =
+    raw["attachment"] !== undefined ? raw["attachment"] : raw["billPhoto"];
+
+  if (rawAttachments !== undefined || rawAttachment !== undefined) {
+    hasFields = true;
+    const attachments: string[] = [];
+    if (Array.isArray(rawAttachments)) {
+      for (let i = 0; i < rawAttachments.length; i++) {
+        const item = rawAttachments[i];
+        if (typeof item === "string" && item.trim()) {
+          attachments.push(item.trim());
+        } else {
+          issues.push({
+            field: `attachments[${i}]`,
+            issue: "Attachment URL must be a non-empty string.",
+          });
+        }
+      }
+    } else if (typeof rawAttachment === "string" && rawAttachment.trim()) {
+      attachments.push(rawAttachment.trim());
+    } else {
+      issues.push({
+        field: "attachments",
+        issue: "Attachments must be an array of string URLs.",
+      });
+    }
+
+    if (attachments.length === 0) {
+      issues.push({
+        field: "attachments",
+        issue: "At least one attachment (bill photo or receipt scan) is required.",
+      });
+    } else {
+      result.attachments = attachments;
+    }
+  }
+
+  if (issues.length > 0) {
+    throw HttpError.validationError(issues);
+  }
+
+  if (!hasFields) {
+    throw HttpError.badRequest(
+      "At least one editable field (notes, payee, attachments) must be provided.",
+      "NO_FIELDS_TO_UPDATE",
+    );
+  }
+
+  return result;
+}
+
 
