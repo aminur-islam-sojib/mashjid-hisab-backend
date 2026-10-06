@@ -46,6 +46,8 @@ model Membership {
   /// FamilyMember record and later got their own login (Stage 3).
   linkedFamilyMember FamilyMember? @relation("FamilyMemberLink")
 
+  donations          Donation[]
+
   // -- Constraints & indices ------------------------------------------------
   /// A user may not hold more than one membership per mosque.
   @@unique([userId, mosqueId])

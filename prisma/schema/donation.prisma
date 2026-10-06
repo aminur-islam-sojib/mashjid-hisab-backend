@@ -1,0 +1,88 @@
+// =============================================================================
+// donation.prisma — Domain C: Donations and Collections
+//
+// Design notes:
+//  • Records income for a mosque.
+//  • Direct linkage to physical Account, operational Fund, and classification Category.
+//  • Flexible Donor identification:
+//      - Linked to an active Membership (memberId)
+//      - Linked to a Family household (familyId)
+//      - Free-text walk-in (donorName, donorPhone, donorEmail)
+//      - Completely anonymous (isAnonymousPublic: true or donorName: "Anonymous")
+//  • Optional campaignId, dueId, pledgeId, source (CASH_BOX, MEMBER, ONLINE, BANK).
+//  • Access & approval flow:
+//      - ADMIN, TREASURER: posts immediately (status = POSTED, receiptNumber generated)
+//      - STAFF: saved as PENDING for admin/treasurer review (status = PENDING, receiptNumber = null)
+//  • Receipt numbers are unique per mosque: @@unique([mosqueId, receiptNumber])
+// =============================================================================
+
+model Donation {
+  id                 String         @id @default(cuid())
+  mosqueId           String
+  mosque             Mosque         @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  // Monetary value in minor units (poisha), strictly positive BigInt
+  amount             BigInt
+
+  // Finance linkages
+  accountId          String
+  account            Account        @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  fundId             String
+  fund               Fund           @relation(fields: [fundId], references: [id], onDelete: Restrict)
+
+  categoryId         String
+  category           Category       @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  // Financial date of donation
+  date               DateTime
+
+  // Donor linkages
+  memberId           String?
+  member             Membership?    @relation(fields: [memberId], references: [id], onDelete: SetNull)
+
+  familyId           String?
+  family             Family?        @relation(fields: [familyId], references: [id], onDelete: SetNull)
+
+  donorName          String?
+  donorPhone         String?
+  donorEmail         String?
+  isAnonymousPublic  Boolean        @default(false)
+
+  // Optional campaign, due, and pledge linkages
+  campaignId         String?
+  dueId              String?
+  pledgeId           String?
+
+  // Collection source channel
+  source             DonationSource @default(MEMBER)
+
+  // Posting lifecycle
+  status             DonationStatus @default(PENDING)
+  receiptNumber      String?
+
+  notes              String?
+
+  // Audit trail
+  createdById        String?
+  createdBy          User?          @relation("DonationRecorder", fields: [createdById], references: [id], onDelete: SetNull)
+
+  postedById         String?
+  postedBy           User?          @relation("DonationPoster", fields: [postedById], references: [id], onDelete: SetNull)
+  postedAt           DateTime?
+
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+
+  @@unique([mosqueId, receiptNumber])
+  @@index([mosqueId])
+  @@index([accountId])
+  @@index([fundId])
+  @@index([categoryId])
+  @@index([memberId])
+  @@index([familyId])
+  @@index([date])
+  @@index([status])
+  @@map("donations")
+}
+

@@ -30,6 +30,7 @@ model Fund {
   updatedAt    DateTime @updatedAt
 
   categories   Category[]
+  donations    Donation[]
 
   @@unique([mosqueId, name])
   @@index([mosqueId])
@@ -55,6 +56,8 @@ model Account {
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
+  donations      Donation[]
+
   @@unique([mosqueId, name])
   @@index([mosqueId])
   @@map("accounts")
@@ -77,6 +80,8 @@ model Category {
 
   createdAt  DateTime     @default(now())
   updatedAt  DateTime     @updatedAt
+
+  donations  Donation[]
 
   @@unique([mosqueId, name, type])
   @@index([mosqueId])

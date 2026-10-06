@@ -62,6 +62,16 @@ export const OPERATIONAL_ROLES: readonly Role[] = [
   Role.STAFF,
 ] as const;
 
+/**
+ * Roles permitted to record donations and collections.
+ * MOSQUE_ADMIN, TREASURER (post immediately); STAFF (saved as PENDING).
+ */
+export const COLLECTION_OPERATOR_ROLES: readonly Role[] = [
+  Role.MOSQUE_ADMIN,
+  Role.TREASURER,
+  Role.STAFF,
+] as const;
+
 export interface RequireMosqueMembershipOptions {
   roles?: readonly Role[];
   allowArchived?: boolean;
@@ -113,8 +123,15 @@ export function requireMosqueMembership(
         );
       }
 
-      // 2. Extract mosqueId from URL parameters
-      const mosqueId = req.params["mosqueId"] || req.params["id"];
+      // 2. Extract mosqueId from URL parameters, body, or headers
+      const bodyMosqueId =
+        req.body && typeof req.body === "object" && typeof (req.body as Record<string, unknown>)["mosqueId"] === "string"
+          ? ((req.body as Record<string, unknown>)["mosqueId"] as string)
+          : undefined;
+      const headerMosqueId =
+        typeof req.headers["x-mosque-id"] === "string" ? req.headers["x-mosque-id"] : undefined;
+
+      const mosqueId = req.params["mosqueId"] || req.params["id"] || bodyMosqueId || headerMosqueId;
       if (!mosqueId || typeof mosqueId !== "string" || !mosqueId.trim()) {
         throw HttpError.badRequest(
           "Route is missing required mosqueId identifier.",

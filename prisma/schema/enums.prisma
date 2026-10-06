@@ -99,3 +99,25 @@ enum FamilyRelation {
   GRANDPARENT
   OTHER
 }
+
+// ---------------------------------------------------------------------------
+// DonationStatus
+// Lifecycle of a donation record.
+// ---------------------------------------------------------------------------
+enum DonationStatus {
+  PENDING
+  POSTED
+  REJECTED
+}
+
+// ---------------------------------------------------------------------------
+// DonationSource
+// Channel through which the donation was collected.
+// ---------------------------------------------------------------------------
+enum DonationSource {
+  CASH_BOX
+  MEMBER
+  ONLINE
+  BANK
+}
+

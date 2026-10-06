@@ -52,6 +52,8 @@ model User {
   refreshTokens           RefreshToken[]
   passwordResetTokens     PasswordResetToken[]
   emailVerificationTokens EmailVerificationToken[]
+  recordedDonations       Donation[]            @relation("DonationRecorder")
+  postedDonations         Donation[]            @relation("DonationPoster")
 
   @@map("users")
 }
