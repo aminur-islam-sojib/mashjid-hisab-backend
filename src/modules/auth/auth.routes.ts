@@ -12,6 +12,7 @@ import {
   forgotPassword,
   resetPassword,
   verifyEmail,
+  changePassword,
 } from "./auth.controller.js";
 import { authenticate } from "../../middlewares/auth.middleware.js";
 
@@ -68,5 +69,12 @@ authRouter.post("/reset-password", resetPassword);
  * Public (with valid verify token) — verifies emailed token and marks emailVerified = true.
  */
 authRouter.post("/verify-email", verifyEmail);
+
+/**
+ * PATCH /api/auth/change-password
+ * Authenticated — Verifies caller's current password, sets a new passwordHash,
+ * clears mustChangePassword, and bumps sessionVersion — invalidating every other active session.
+ */
+authRouter.patch("/change-password", authenticate, changePassword);
 
 export default authRouter;

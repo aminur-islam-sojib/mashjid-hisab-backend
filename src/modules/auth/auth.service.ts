@@ -36,6 +36,7 @@ import type {
   ForgotPasswordInput,
   ResetPasswordInput,
   VerifyEmailInput,
+  ChangePasswordInput,
 } from "./auth.validation.js";
 import {
   MembershipStatus,
@@ -60,6 +61,7 @@ export interface PublicUser {
   phone: string | null;
   locale: string;
   emailVerified: boolean;
+  mustChangePassword: boolean;
   status: UserStatus;
   role: Role | null;
 }
@@ -266,6 +268,7 @@ export async function registerUser(
           phone: true,
           locale: true,
           emailVerified: true,
+          mustChangePassword: true,
           status: true,
           role: true,
           sessionVersion: true,
@@ -329,6 +332,7 @@ export async function registerUser(
       phone: createdUser.phone ?? null,
       locale: createdUser.locale,
       emailVerified: createdUser.emailVerified,
+      mustChangePassword: createdUser.mustChangePassword,
       status: createdUser.status,
       role: createdUser.role ?? null,
     },
@@ -366,6 +370,7 @@ export async function loginUser(
       phone: true,
       locale: true,
       emailVerified: true,
+      mustChangePassword: true,
       status: true,
       role: true,
       passwordHash: true,
@@ -456,6 +461,7 @@ export async function loginUser(
       phone: user.phone ?? null,
       locale: user.locale,
       emailVerified: user.emailVerified,
+      mustChangePassword: user.mustChangePassword,
       status: user.status,
       role: user.role ?? null,
     },
@@ -616,6 +622,7 @@ export async function getAuthenticatedUser(
       phone: true,
       locale: true,
       emailVerified: true,
+      mustChangePassword: true,
       status: true,
       role: true,
       memberships: {
@@ -661,6 +668,7 @@ export async function getAuthenticatedUser(
       phone: user.phone ?? null,
       locale: user.locale,
       emailVerified: user.emailVerified,
+      mustChangePassword: user.mustChangePassword,
       status: user.status,
       role: user.role ?? null,
     },
@@ -840,3 +848,163 @@ export async function verifyEmail(
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// changePassword — verifies caller's current password, sets new passwordHash,
+// clears mustChangePassword, and bumps sessionVersion (invalidating all other sessions).
+// This is the endpoint a member hits right after their first login on an admin-created account.
+// ---------------------------------------------------------------------------
+
+export interface ChangePasswordResult {
+  user: PublicUser;
+  accessToken: string;
+  refreshToken: string;
+}
+
+export async function changePassword(
+  userId: string,
+  input: ChangePasswordInput,
+  activeMosqueId?: string | null,
+  meta?: { userAgent?: string; ipAddress?: string },
+): Promise<ChangePasswordResult> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      phone: true,
+      locale: true,
+      emailVerified: true,
+      passwordHash: true,
+      mustChangePassword: true,
+      status: true,
+      role: true,
+      sessionVersion: true,
+    },
+  });
+
+  if (!user) {
+    throw HttpError.unauthorized(
+      "User account no longer exists.",
+      "AUTH_USER_NOT_FOUND",
+    );
+  }
+
+  if (user.status === UserStatus.BLOCKED) {
+    throw HttpError.forbidden(
+      "Your account has been blocked. Please contact support.",
+      "ACCOUNT_BLOCKED",
+    );
+  }
+
+  if (user.status === UserStatus.INACTIVE) {
+    throw HttpError.forbidden(
+      "Your account is inactive. Please contact support.",
+      "ACCOUNT_INACTIVE",
+    );
+  }
+
+  // 1. Verify caller's current password
+  const isMatch = await bcrypt.compare(input.currentPassword, user.passwordHash);
+  if (!isMatch) {
+    throw HttpError.badRequest(
+      "Current password is incorrect.",
+      "AUTH_INVALID_CURRENT_PASSWORD",
+    );
+  }
+
+  // 2. Hash new password before transaction
+  const newPasswordHash = await bcrypt.hash(input.newPassword, config.BCRYPT_ROUNDS);
+
+  // 3. Load active memberships to resolve tenant context & permissions
+  const memberships = await prisma.membership.findMany({
+    where: {
+      userId: user.id,
+      status: MembershipStatus.ACTIVE,
+    },
+    select: { id: true, mosqueId: true, role: true, status: true },
+  });
+
+  const activeMembership = activeMosqueId
+    ? memberships.find((m) => m.mosqueId === activeMosqueId) ?? resolveActiveMembership(memberships)
+    : resolveActiveMembership(memberships);
+  const effectiveRole = activeMembership?.role ?? user.role ?? null;
+  const refreshJti = crypto.randomUUID();
+
+  // 4. Atomic transaction: update password, clear mustChangePassword, bump sessionVersion,
+  // revoke all previous refresh tokens, and issue fresh refresh token for the new session version.
+  const { updatedUser, rawRefreshJwt } = await prisma.$transaction(async (tx) => {
+    // Revoke all existing refresh tokens
+    await tx.refreshToken.updateMany({
+      where: {
+        userId: user.id,
+        revokedAt: null,
+      },
+      data: {
+        revokedAt: new Date(),
+      },
+    });
+
+    // Update password, clear mustChangePassword, bump sessionVersion
+    const updated = await tx.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash: newPasswordHash,
+        mustChangePassword: false,
+        sessionVersion: { increment: 1 },
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        locale: true,
+        emailVerified: true,
+        mustChangePassword: true,
+        status: true,
+        role: true,
+        sessionVersion: true,
+      },
+    });
+
+    // Issue fresh refresh token carrying the new sessionVersion for this active session
+    const freshRefreshToken = await issueRefreshToken(tx, {
+      userId: user.id,
+      sessionVersion: updated.sessionVersion,
+      activeMembership,
+      meta: meta ?? {},
+      jti: refreshJti,
+    });
+
+    return {
+      updatedUser: updated,
+      rawRefreshJwt: freshRefreshToken,
+    };
+  });
+
+  // 5. Issue fresh access token carrying the new sessionVersion
+  const newAccessToken = signAccessToken({
+    sub: user.id,
+    mosqueId: activeMembership?.mosqueId ?? null,
+    role: effectiveRole,
+    sessionVersion: updatedUser.sessionVersion,
+  });
+
+  return {
+    user: {
+      id: updatedUser.id,
+      name: updatedUser.name,
+      email: updatedUser.email,
+      phone: updatedUser.phone ?? null,
+      locale: updatedUser.locale,
+      emailVerified: updatedUser.emailVerified,
+      mustChangePassword: updatedUser.mustChangePassword,
+      status: updatedUser.status,
+      role: updatedUser.role ?? null,
+    },
+    accessToken: newAccessToken,
+    refreshToken: rawRefreshJwt,
+  };
+}
+

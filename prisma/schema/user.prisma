@@ -20,8 +20,9 @@ model User {
   passwordHash String
 
   // -- Verification / account state ----------------------------------------
-  emailVerified Boolean    @default(false)
-  status        UserStatus @default(ACTIVE)
+  emailVerified      Boolean    @default(false)
+  mustChangePassword Boolean    @default(false)
+  status             UserStatus @default(ACTIVE)
 
   // -- Platform role (SUPER_ADMIN; all tenant-scoped roles live on Membership)
   role          Role?

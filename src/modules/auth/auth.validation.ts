@@ -253,3 +253,79 @@ export function validateVerifyEmailInput(body: unknown): VerifyEmailInput {
 
   return { token };
 }
+
+// ---------------------------------------------------------------------------
+// Change Password
+// ---------------------------------------------------------------------------
+
+export interface ChangePasswordInput {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export function validateChangePasswordInput(body: unknown): ChangePasswordInput {
+  if (!body || typeof body !== "object") {
+    throw HttpError.badRequest("Request body must be a JSON object.");
+  }
+
+  const raw = body as Record<string, unknown>;
+  const issues: ValidationIssue[] = [];
+
+  const currentPassword =
+    typeof raw["currentPassword"] === "string"
+      ? raw["currentPassword"]
+      : typeof raw["oldPassword"] === "string"
+        ? raw["oldPassword"]
+        : "";
+
+  if (!currentPassword) {
+    issues.push({
+      field: "currentPassword",
+      issue: "Current password is required.",
+    });
+  }
+
+  const newPassword =
+    typeof raw["newPassword"] === "string"
+      ? raw["newPassword"]
+      : typeof raw["password"] === "string"
+        ? raw["password"]
+        : "";
+
+  if (newPassword.length < 8) {
+    issues.push({ field: "newPassword", issue: "Must be at least 8 characters." });
+  } else {
+    if (!/[A-Z]/.test(newPassword)) {
+      issues.push({
+        field: "newPassword",
+        issue: "Must contain at least one uppercase letter.",
+      });
+    }
+    if (!/[a-z]/.test(newPassword)) {
+      issues.push({
+        field: "newPassword",
+        issue: "Must contain at least one lowercase letter.",
+      });
+    }
+    if (!/[0-9]/.test(newPassword)) {
+      issues.push({
+        field: "newPassword",
+        issue: "Must contain at least one digit.",
+      });
+    }
+  }
+
+  if (currentPassword && newPassword && currentPassword === newPassword) {
+    issues.push({
+      field: "newPassword",
+      issue: "New password must be different from current password.",
+    });
+  }
+
+  if (issues.length > 0) {
+    throw HttpError.validationError(issues);
+  }
+
+  return { currentPassword, newPassword };
+}
+

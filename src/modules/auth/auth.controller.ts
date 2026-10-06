@@ -28,6 +28,7 @@ import {
   validateForgotPasswordInput,
   validateResetPasswordInput,
   validateVerifyEmailInput,
+  validateChangePasswordInput,
 } from "./auth.validation.js";
 import {
   registerUser,
@@ -38,6 +39,7 @@ import {
   requestPasswordReset,
   resetPassword as resetPasswordService,
   verifyEmail as verifyEmailService,
+  changePassword as changePasswordService,
 } from "./auth.service.js";
 
 /**
@@ -283,3 +285,33 @@ export const verifyEmail = catchAsync(async (req: Request, res: Response) => {
     data: null,
   });
 });
+
+// ---------------------------------------------------------------------------
+// PATCH /api/auth/change-password — 200 OK (Authenticated)
+// Verifies caller's current password, sets a new passwordHash, clears mustChangePassword,
+// and bumps sessionVersion — invalidating all other sessions.
+// ---------------------------------------------------------------------------
+export const changePassword = catchAsync(async (req: Request, res: Response) => {
+  const userId = req.user!.sub;
+  const activeMosqueId = req.user?.mosqueId;
+  const input = validateChangePasswordInput(req.body);
+
+  const result = await changePasswordService(userId, input, activeMosqueId, {
+    userAgent: req.headers["user-agent"],
+    ipAddress: req.ip,
+  });
+
+  // Set fresh auth cookies for the new session version
+  setAccessTokenCookie(res, result.accessToken);
+  setRefreshTokenCookie(res, result.refreshToken);
+
+  sendResponse(res, {
+    statusCode: 200,
+    message: "Password changed successfully.",
+    data: {
+      user: result.user,
+      accessToken: result.accessToken,
+    },
+  });
+});
+
