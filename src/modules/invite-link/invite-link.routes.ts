@@ -8,7 +8,10 @@ import {
   requireMosqueMembership,
   ADMIN_ONLY_ROLES,
 } from "../../middlewares/mosque.middleware.js";
-import { createInviteLinkHandler } from "./invite-link.controller.js";
+import {
+  createInviteLinkHandler,
+  getMosqueInviteLinksHandler,
+} from "./invite-link.controller.js";
 
 const inviteLinkRouter: Router = Router({ mergeParams: true });
 
@@ -26,5 +29,19 @@ inviteLinkRouter.post(
   createInviteLinkHandler,
 );
 
+/**
+ * GET /api/mosques/:mosqueId/invite-links
+ * Access: Authenticated + MOSQUE_ADMIN (ADMIN_ONLY_ROLES)
+ *
+ * Lists MosqueInviteLinks with useCount and isActive status.
+ */
+inviteLinkRouter.get(
+  "/",
+  authenticate,
+  requireMosqueMembership(...ADMIN_ONLY_ROLES),
+  getMosqueInviteLinksHandler,
+);
+
 export default inviteLinkRouter;
+
 

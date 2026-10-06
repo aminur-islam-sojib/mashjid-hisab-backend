@@ -107,3 +107,47 @@ export function validateInviteLinkIdParam(param: unknown): string {
   return param.trim();
 }
 
+export interface GetMosqueInviteLinksQuery {
+  role?: Role;
+  includeArchived?: boolean;
+}
+
+/**
+ * Validates query parameters for GET /api/mosques/:mosqueId/invite-links
+ *
+ * Supported filters:
+ * - ?role= (e.g. MEMBER, STAFF, TREASURER, etc.)
+ * - ?includeArchived= (true/false)
+ */
+export function validateGetMosqueInviteLinksQuery(
+  query: unknown,
+): GetMosqueInviteLinksQuery {
+  if (!query || typeof query !== "object") return {};
+  const raw = query as Record<string, unknown>;
+  const result: GetMosqueInviteLinksQuery = {};
+
+  if (raw["role"] !== undefined && raw["role"] !== null && raw["role"] !== "") {
+    if (typeof raw["role"] !== "string") {
+      throw HttpError.badRequest("Role filter must be a string.", "INVALID_ROLE_FILTER");
+    }
+    const roleUpper = raw["role"].trim().toUpperCase();
+    if (!Object.values(Role).includes(roleUpper as Role)) {
+      throw HttpError.badRequest(
+        `Invalid role filter '${raw["role"]}'. Allowed: ${Object.values(Role).join(", ")}.`,
+        "INVALID_ROLE_FILTER",
+      );
+    }
+    result.role = roleUpper as Role;
+  }
+
+  if (raw["includeArchived"] !== undefined) {
+    result.includeArchived =
+      raw["includeArchived"] === true ||
+      raw["includeArchived"] === "true" ||
+      raw["includeArchived"] === "1";
+  }
+
+  return result;
+}
+
+

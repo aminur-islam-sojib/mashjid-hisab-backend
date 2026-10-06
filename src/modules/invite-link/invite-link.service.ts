@@ -14,8 +14,11 @@
 import { prisma } from "../../lib/prisma.js";
 import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
 import { generateOpaqueToken } from "../../utils/token.js";
-import { Role } from "../../../generated/prisma/client.js";
-import type { CreateInviteLinkInput } from "./invite-link.validation.js";
+import { Role, Prisma } from "../../../generated/prisma/client.js";
+import type {
+  CreateInviteLinkInput,
+  GetMosqueInviteLinksQuery,
+} from "./invite-link.validation.js";
 
 export interface InviteLinkCreatedResponse {
   id: string;
@@ -27,6 +30,27 @@ export interface InviteLinkCreatedResponse {
   expiresAt: Date | null;
   isArchived: boolean;
   createdById: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface MosqueInviteLinkItem {
+  id: string;
+  mosqueId: string;
+  role: Role;
+  maxUses: number | null;
+  useCount: number;
+  expiresAt: Date | null;
+  isActive: boolean;
+  isArchived: boolean;
+  isExpired: boolean;
+  isExhausted: boolean;
+  createdById: string | null;
+  createdBy: {
+    id: string;
+    name: string;
+    email: string | null;
+  } | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -81,4 +105,77 @@ export async function createInviteLink(
     updatedAt: inviteLink.updatedAt,
   };
 }
+
+/**
+ * Lists MosqueInviteLinks for a mosque with useCount and live isActive calculation.
+ *
+ * Business logic:
+ * A link is considered `isActive: true` if:
+ * 1. It is not archived (`!isArchived`)
+ * 2. It has not passed its expiration date (`expiresAt === null || expiresAt > now`)
+ * 3. It has not exhausted its allowed usage (`maxUses === null || useCount < maxUses`)
+ *
+ * Access: Authenticated + MOSQUE_ADMIN (ADMIN_ONLY_ROLES)
+ *
+ * @param mosqueId - Identifier (CUID or slug) of the target mosque
+ * @param query - Optional filters (role, includeArchived)
+ */
+export async function getMosqueInviteLinks(
+  mosqueId: string,
+  query?: GetMosqueInviteLinksQuery,
+): Promise<MosqueInviteLinkItem[]> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  const where: Prisma.MosqueInviteLinkWhereInput = {
+    mosqueId: resolvedMosqueId,
+  };
+
+  if (!query?.includeArchived) {
+    where.isArchived = false;
+  }
+
+  if (query?.role) {
+    where.role = query.role;
+  }
+
+  const links = await prisma.mosqueInviteLink.findMany({
+    where,
+    orderBy: { createdAt: "desc" },
+    include: {
+      createdBy: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+        },
+      },
+    },
+  });
+
+  const now = new Date();
+
+  return links.map((link) => {
+    const isExpired = link.expiresAt ? link.expiresAt.getTime() <= now.getTime() : false;
+    const isExhausted = link.maxUses !== null ? link.useCount >= link.maxUses : false;
+    const isActive = !link.isArchived && !isExpired && !isExhausted;
+
+    return {
+      id: link.id,
+      mosqueId: link.mosqueId,
+      role: link.role,
+      maxUses: link.maxUses,
+      useCount: link.useCount,
+      expiresAt: link.expiresAt,
+      isActive,
+      isArchived: link.isArchived,
+      isExpired,
+      isExhausted,
+      createdById: link.createdById,
+      createdBy: link.createdBy ?? null,
+      createdAt: link.createdAt,
+      updatedAt: link.updatedAt,
+    };
+  });
+}
+
 
