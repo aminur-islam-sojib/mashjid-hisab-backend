@@ -62,14 +62,47 @@ export const OPERATIONAL_ROLES: readonly Role[] = [
   Role.STAFF,
 ] as const;
 
+export interface RequireMosqueMembershipOptions {
+  roles?: readonly Role[];
+  allowArchived?: boolean;
+}
+
 /**
  * Middleware factory requiring the caller to hold an ACTIVE Membership in the
  * mosque identified by the `:mosqueId` route parameter.
  *
- * If `allowedRoles` are specified, verifies that caller's live role is included.
- * Populates `req.membership` and `req.mosqueId` on success.
+ * Security & Tenancy guarantees:
+ *  • Validates authentication and active user account state.
+ *  • Queries live membership directly from DB (never trusts stale JWT claims).
+ *  • Rejects soft-deleted / archived mosques (returns 404 to avoid leaking existence).
+ *  • Enforces role restrictions if specified.
+ *  • Populates `req.membership` and resolved canonical `req.mosqueId` on success.
+ *
+ * Can be called with role list:
+ *   requireMosqueMembership(Role.MOSQUE_ADMIN)
+ *   requireMosqueMembership(...OVERSIGHT_ROLES)
+ * Or with configuration options:
+ *   requireMosqueMembership({ roles: [Role.MOSQUE_ADMIN], allowArchived: true })
  */
-export function requireMosqueMembership(...allowedRoles: Role[]) {
+export function requireMosqueMembership(
+  ...args: (Role | RequireMosqueMembershipOptions)[]
+) {
+  let allowedRoles: readonly Role[] = [];
+  let allowArchived = false;
+
+  if (
+    args.length === 1 &&
+    typeof args[0] === "object" &&
+    args[0] !== null &&
+    !("length" in args[0])
+  ) {
+    const opts = args[0] as RequireMosqueMembershipOptions;
+    allowedRoles = opts.roles ?? [];
+    allowArchived = opts.allowArchived ?? false;
+  } else {
+    allowedRoles = args as Role[];
+  }
+
   return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
     try {
       // 1. Ensure user is authenticated
@@ -102,6 +135,12 @@ export function requireMosqueMembership(...allowedRoles: Role[]) {
           user: {
             select: { status: true },
           },
+          mosque: {
+            select: {
+              id: true,
+              isArchived: true,
+            },
+          },
         },
       });
 
@@ -114,7 +153,15 @@ export function requireMosqueMembership(...allowedRoles: Role[]) {
         );
       }
 
-      // 4b. Global user account must be ACTIVE
+      // 4b. Mosque tenant must exist and not be soft-deleted / archived
+      if (!allowArchived && (!membership.mosque || membership.mosque.isArchived)) {
+        throw HttpError.notFound(
+          "Mosque not found.",
+          "MOSQUE_NOT_FOUND",
+        );
+      }
+
+      // 4c. Global user account must be ACTIVE
       if (membership.user.status !== UserStatus.ACTIVE) {
         throw HttpError.forbidden(
           "Access denied. Your user account is inactive or blocked.",
