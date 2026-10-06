@@ -18,6 +18,7 @@ import type {
   GetMosqueDonationsQueryInput,
   UpdateDonationInput,
 } from "./donation.validation.js";
+import { syncPledgeStatus } from "../pledge/pledge.service.js";
 
 export interface DonationActor {
   userId: string;
@@ -630,6 +631,19 @@ export async function createDonation(
           input.categoryId,
         );
 
+        // 1b. Pledge validation if provided
+        if (input.pledgeId) {
+          const pledge = await tx.pledge.findFirst({
+            where: { id: input.pledgeId, mosqueId: resolvedMosqueId },
+          });
+          if (!pledge) {
+            throw HttpError.notFound("Pledge not found in this mosque.", "PLEDGE_NOT_FOUND");
+          }
+          if (pledge.status === "CANCELLED") {
+            throw HttpError.badRequest("Cannot record donation against a cancelled pledge.", "PLEDGE_CANCELLED");
+          }
+        }
+
         // 2. Donor resolution
         const donorSnapshot = await resolveDonorInformation(
           tx,
@@ -704,6 +718,10 @@ export async function createDonation(
             voidedBy: { select: { id: true, name: true, email: true } },
           },
         });
+
+        if (status === DonationStatus.POSTED && input.pledgeId) {
+          await syncPledgeStatus(tx, input.pledgeId);
+        }
 
         return donation;
       });
@@ -1085,6 +1103,11 @@ export async function voidDonation(
 
     // Attach created reversal entry to voided record for complete linkage in return payload
     (voided as any).reversalEntry = reversal;
+
+    // Resync pledge status if this donation was pledged
+    if (donation.pledgeId) {
+      await syncPledgeStatus(tx, donation.pledgeId);
+    }
 
     return {
       voidedDonation: mapDonationResponse(voided),

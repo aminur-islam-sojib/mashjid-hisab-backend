@@ -23,6 +23,7 @@ import {
   getFundBalance,
 } from "../expense/expense.service.js";
 import { TRANSFER_PAIR_INCLUDE } from "../transfer/transfer.service.js";
+import { syncPledgeStatus } from "../pledge/pledge.service.js";
 import type {
   GetTransactionsQueryInput,
   GetPendingTransactionsQueryInput,
@@ -1062,7 +1063,7 @@ export async function approveTransaction(
         receiptNumber = await generateNextReceiptNumber(tx, resolvedMosqueId, donation.date.getFullYear());
       }
 
-      return tx.donation.update({
+      const updatedDonation = await tx.donation.update({
         where: { id: donation.id },
         data: {
           status: DonationStatus.POSTED,
@@ -1078,6 +1079,12 @@ export async function approveTransaction(
           postedBy: { select: { id: true, name: true, email: true } },
         },
       });
+
+      if (donation.pledgeId) {
+        await syncPledgeStatus(tx, donation.pledgeId);
+      }
+
+      return updatedDonation;
     });
 
     return {

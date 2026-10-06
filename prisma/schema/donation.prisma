@@ -53,6 +53,7 @@ model Donation {
   campaignId         String?
   dueId              String?
   pledgeId           String?
+  pledge             Pledge?        @relation(fields: [pledgeId], references: [id], onDelete: SetNull)
 
   // Collection source channel
   source             DonationSource @default(MEMBER)
@@ -101,6 +102,7 @@ model Donation {
   @@index([categoryId])
   @@index([memberId])
   @@index([familyId])
+  @@index([pledgeId])
   @@index([date])
   @@index([status])
   @@map("donations")

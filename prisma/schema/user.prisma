@@ -65,6 +65,8 @@ model User {
   rejectedExpenses        Expense[]             @relation("ExpenseRejecter")
   createdCampaigns        Campaign[]            @relation("CampaignCreator")
   closedCampaigns         Campaign[]            @relation("CampaignCloser")
+  createdPledges          Pledge[]              @relation("PledgeCreator")
+  cancelledPledges        Pledge[]              @relation("PledgeCanceller")
 
   @@map("users")
 }

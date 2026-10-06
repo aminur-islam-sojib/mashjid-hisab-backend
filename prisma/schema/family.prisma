@@ -35,6 +35,7 @@ model Family {
 
   members   FamilyMember[]
   donations Donation[]
+  pledges   Pledge[]
 
   @@index([mosqueId])
   @@map("families")

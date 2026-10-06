@@ -47,6 +47,7 @@ model Membership {
   linkedFamilyMember FamilyMember? @relation("FamilyMemberLink")
 
   donations          Donation[]
+  pledges            Pledge[]
 
   // -- Constraints & indices ------------------------------------------------
   /// A user may not hold more than one membership per mosque.

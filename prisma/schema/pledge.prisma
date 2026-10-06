@@ -1,0 +1,77 @@
+// =============================================================================
+// pledge.prisma — Domain F: Pledges (Member commitments to donate)
+//
+// Design notes:
+//  • A Pledge records a promise/commitment to donate money towards a Fund or Campaign.
+//  • Creating a pledge does NOT create a ledger entry.
+//  • Pledges can be recorded by a MEMBER (for self or own family), or by
+//    MOSQUE_ADMIN / TREASURER (for anyone).
+//  • Paid amount is determined by summing all POSTED donations linked via pledgeId.
+//  • A pledge lifecycle:
+//      OPEN      — No payments recorded yet
+//      PARTIAL   — Some payments made (0 < paidAmount < amount)
+//      FULFILLED — Fully paid (paidAmount >= amount)
+//      CANCELLED — Cancelled by pledger or admin; open balance cancelled,
+//                  prior payments remain intact.
+// =============================================================================
+
+model Pledge {
+  id           String       @id @default(cuid())
+  mosqueId     String
+  mosque       Mosque       @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  // Fund this pledge belongs to (mandatory for proper accounting allocation)
+  fundId       String
+  fund         Fund         @relation(fields: [fundId], references: [id], onDelete: Restrict)
+
+  // Optional campaign linkage (if pledging towards a specific campaign)
+  campaignId   String?
+  campaign     Campaign?    @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  // Committed monetary value in minor units (poisha), strictly positive BigInt
+  amount       BigInt
+
+  // Due date by which the pledge is committed to be paid
+  dueDate      DateTime
+
+  // Optional number of installments (e.g. 4 installments)
+  installments Int?
+
+  // Pledger identification (member, family, or free-text)
+  memberId     String?
+  member       Membership?  @relation(fields: [memberId], references: [id], onDelete: SetNull)
+
+  familyId     String?
+  family       Family?      @relation(fields: [familyId], references: [id], onDelete: SetNull)
+
+  donorName    String?
+  donorPhone   String?
+  donorEmail   String?
+
+  notes        String?
+
+  // Status & cancellation audit
+  status       PledgeStatus @default(OPEN)
+  cancelledAt  DateTime?
+  cancelledById String?
+  cancelledBy  User?        @relation("PledgeCanceller", fields: [cancelledById], references: [id], onDelete: SetNull)
+  cancelReason String?
+
+  // Audit trail
+  createdById  String?
+  createdBy    User?        @relation("PledgeCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  donations    Donation[]
+
+  @@index([mosqueId])
+  @@index([fundId])
+  @@index([campaignId])
+  @@index([memberId])
+  @@index([familyId])
+  @@index([status])
+  @@index([dueDate])
+  @@map("pledges")
+}

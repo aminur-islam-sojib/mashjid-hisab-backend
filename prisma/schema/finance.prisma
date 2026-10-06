@@ -34,6 +34,7 @@ model Fund {
   expenses     Expense[]
   transfers    Transfer[]
   campaigns    Campaign[]
+  pledges      Pledge[]
 
   @@unique([mosqueId, name])
   @@index([mosqueId])

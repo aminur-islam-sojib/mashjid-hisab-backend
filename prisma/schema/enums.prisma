@@ -160,3 +160,14 @@ enum CampaignStatus {
   ACTIVE // Accepting donations
   CLOSED // Manually closed; history frozen, no new donations accepted
 }
+
+// ---------------------------------------------------------------------------
+// PledgeStatus
+// Lifecycle of a pledge commitment.
+// ---------------------------------------------------------------------------
+enum PledgeStatus {
+  OPEN       // Active pledge, no payments made yet
+  PARTIAL    // Partially paid (0 < paid < amount)
+  FULFILLED  // Fully paid (paid >= amount)
+  CANCELLED  // Cancelled by pledger or admin
+}
