@@ -14,7 +14,7 @@
 import { prisma } from "../../lib/prisma.js";
 import { HttpError } from "../../errors/HttpError.js";
 import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
-import { generateOpaqueToken } from "../../utils/token.js";
+import { generateOpaqueToken, hashToken } from "../../utils/token.js";
 import { Role, Prisma } from "../../../generated/prisma/client.js";
 import type {
   CreateInviteLinkInput,
@@ -266,5 +266,68 @@ export async function revokeInviteLink(
 
 export const revokeMosqueInviteLink = revokeInviteLink;
 
+export interface PublicInviteLinkInfo {
+  mosqueName: string;
+}
 
+/**
+ * Reusable helper: Evaluates whether an invite link is active, unexpired, and not exhausted.
+ */
+export function isInviteLinkUsable(link: {
+  isArchived: boolean;
+  expiresAt: Date | null;
+  maxUses: number | null;
+  useCount: number;
+}): boolean {
+  if (link.isArchived) return false;
+  if (link.expiresAt && link.expiresAt.getTime() <= Date.now()) return false;
+  if (link.maxUses !== null && link.useCount >= link.maxUses) return false;
+  return true;
+}
 
+/**
+ * Validates an invite token for the public join page.
+ *
+ * Security & existence-hiding posture:
+ * - Publicly accessible without authentication.
+ * - Computes SHA-256 hash to look up link.
+ * - Validates: exists, active, unexpired, usage under max limit, and associated mosque active.
+ * - If invalid, expired, revoked, or exhausted: throws a uniform generic 404 error
+ *   to avoid leaking whether a link ever existed or why it cannot be used.
+ * - Data exposure: returns ONLY the mosque's name.
+ *
+ * @param rawToken - 64-character raw hex token from URL
+ */
+export async function getPublicInviteLinkInfo(
+  rawToken: string,
+): Promise<PublicInviteLinkInfo> {
+  const tokenHash = hashToken(rawToken);
+
+  const inviteLink = await prisma.mosqueInviteLink.findUnique({
+    where: { tokenHash },
+    select: {
+      isArchived: true,
+      expiresAt: true,
+      maxUses: true,
+      useCount: true,
+      mosque: {
+        select: {
+          name: true,
+          isArchived: true,
+        },
+      },
+    },
+  });
+
+  // Existence-hiding: Return the same generic 404 for all invalidity states
+  if (!inviteLink || inviteLink.mosque.isArchived || !isInviteLinkUsable(inviteLink)) {
+    throw HttpError.notFound(
+      "Invite link not found or has expired.",
+      "INVITE_LINK_NOT_FOUND",
+    );
+  }
+
+  return {
+    mosqueName: inviteLink.mosque.name,
+  };
+}

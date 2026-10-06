@@ -10,6 +10,7 @@ import mosqueRouter, {
   publicMosqueRouter,
 } from "../modules/mosque/mosque.routes.js";
 import membershipRouter from "../modules/membership/membership.routes.js";
+import { publicInviteLinkRouter } from "../modules/invite-link/invite-link.routes.js";
 
 const apiRouter: Router = Router();
 
@@ -18,9 +19,10 @@ apiRouter.use("/users", userRouter);
 apiRouter.use("/mosques", mosqueRouter);
 apiRouter.use("/memberships", membershipRouter);
 
-// Public routes (transparency, public mosque profile, donation summaries)
+// Public routes (transparency, public mosque profile, donation summaries, invite links)
 const publicRouter: Router = Router();
 publicRouter.use("/mosques", publicMosqueRouter);
+publicRouter.use("/invite-links", publicInviteLinkRouter);
 apiRouter.use("/public", publicRouter);
 
 export default apiRouter;

@@ -107,6 +107,17 @@ export function validateInviteLinkIdParam(param: unknown): string {
   return param.trim();
 }
 
+/**
+ * Validates route parameter :token for public invite link endpoint.
+ * Generic 404 error if missing or invalid string to maintain existence-hiding posture.
+ */
+export function validateInviteTokenParam(param: unknown): string {
+  if (typeof param !== "string" || !param.trim()) {
+    throw HttpError.notFound("Invite link not found or has expired.", "INVITE_LINK_NOT_FOUND");
+  }
+  return param.trim();
+}
+
 export interface GetMosqueInviteLinksQuery {
   role?: Role;
   includeArchived?: boolean;

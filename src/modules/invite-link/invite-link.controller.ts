@@ -10,11 +10,13 @@ import {
   validateCreateInviteLinkInput,
   validateGetMosqueInviteLinksQuery,
   validateInviteLinkIdParam,
+  validateInviteTokenParam,
 } from "./invite-link.validation.js";
 import {
   createInviteLink,
   getMosqueInviteLinks,
   revokeInviteLink,
+  getPublicInviteLinkInfo,
 } from "./invite-link.service.js";
 
 /**
@@ -85,5 +87,24 @@ export const revokeInviteLinkHandler = catchAsync(
 
 export const revokeMosqueInviteLinkHandler = revokeInviteLinkHandler;
 
+/**
+ * GET /api/public/invite-links/:token
+ * Access: Public (unauthenticated)
+ *
+ * Validates the token (isActive, not expired, under maxUses, mosque active)
+ * and returns just the mosque's name — what the join page shows before the person commits.
+ * Returns a generic 404 for invalid/expired/exhausted/revoked tokens (existence-hiding).
+ */
+export const getPublicInviteLinkInfoHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const token = validateInviteTokenParam(req.params["token"]);
 
+    const info = await getPublicInviteLinkInfo(token);
 
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Invite link verified successfully.",
+      data: info,
+    });
+  },
+);

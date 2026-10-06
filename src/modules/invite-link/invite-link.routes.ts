@@ -12,6 +12,7 @@ import {
   createInviteLinkHandler,
   getMosqueInviteLinksHandler,
   revokeInviteLinkHandler,
+  getPublicInviteLinkInfoHandler,
 } from "./invite-link.controller.js";
 
 const inviteLinkRouter: Router = Router({ mergeParams: true });
@@ -57,7 +58,20 @@ inviteLinkRouter.post(
   revokeInviteLinkHandler,
 );
 
+// ---------------------------------------------------------------------------
+// Public Invite Link Router — Unauthenticated Public Join Flow
+// ---------------------------------------------------------------------------
+
+export const publicInviteLinkRouter: Router = Router();
+
+/**
+ * GET /api/public/invite-links/:token
+ * Access: Public (unauthenticated)
+ *
+ * Validates the token (isActive, not expired, under maxUses) and returns just the mosque's name —
+ * what the join page shows before the person commits.
+ * Existence-hiding: Returns a generic 404 for invalid/expired/exhausted/revoked tokens.
+ */
+publicInviteLinkRouter.get("/:token", getPublicInviteLinkInfoHandler);
+
 export default inviteLinkRouter;
-
-
-
