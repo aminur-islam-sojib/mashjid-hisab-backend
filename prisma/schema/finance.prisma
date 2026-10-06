@@ -35,6 +35,8 @@ model Fund {
   transfers    Transfer[]
   campaigns    Campaign[]
   pledges      Pledge[]
+  chandaPlans  ChandaPlan[]
+  dues         Due[]
 
   @@unique([mosqueId, name])
   @@index([mosqueId])

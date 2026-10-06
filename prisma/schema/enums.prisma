@@ -171,3 +171,33 @@ enum PledgeStatus {
   FULFILLED  // Fully paid (paid >= amount)
   CANCELLED  // Cancelled by pledger or admin
 }
+
+// ---------------------------------------------------------------------------
+// ChandaFrequency
+// Recurring frequency for chanda plans.
+// ---------------------------------------------------------------------------
+enum ChandaFrequency {
+  MONTHLY
+  YEARLY
+}
+
+// ---------------------------------------------------------------------------
+// ChandaPlanStatus
+// Lifecycle of a recurring chanda plan.
+// ---------------------------------------------------------------------------
+enum ChandaPlanStatus {
+  ACTIVE
+  PAUSED
+  ENDED
+}
+
+// ---------------------------------------------------------------------------
+// DueStatus
+// Lifecycle of an individual periodic chanda due.
+// ---------------------------------------------------------------------------
+enum DueStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  WAIVED
+}

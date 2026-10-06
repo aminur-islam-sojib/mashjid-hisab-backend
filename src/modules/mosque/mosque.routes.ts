@@ -18,6 +18,7 @@ import transferRouter from "../transfer/transfer.routes.js";
 import transactionRouter from "../transaction/transaction.routes.js";
 import campaignRouter from "../campaign/campaign.routes.js";
 import pledgeRouter from "../pledge/pledge.routes.js";
+import { chandaPlanRouter, dueRouter } from "../chanda/chanda.routes.js";
 import {
   createMosqueHandler,
   getUserMosquesHandler,
@@ -109,6 +110,18 @@ mosqueRouter.use("/:mosqueId/campaigns", campaignRouter);
  * Delegated to Pledge Router (member commitments)
  */
 mosqueRouter.use("/:mosqueId/pledges", pledgeRouter);
+
+/**
+ * /api/mosques/:mosqueId/chanda-plans
+ * Delegated to Chanda Plan Router (recurring chanda plans)
+ */
+mosqueRouter.use("/:mosqueId/chanda-plans", chandaPlanRouter);
+
+/**
+ * /api/mosques/:mosqueId/dues
+ * Delegated to Due Router (monthly chanda dues & collections)
+ */
+mosqueRouter.use("/:mosqueId/dues", dueRouter);
 
 /**
  * GET /api/mosques/:mosqueId

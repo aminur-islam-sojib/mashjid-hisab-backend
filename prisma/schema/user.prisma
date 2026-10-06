@@ -67,6 +67,8 @@ model User {
   closedCampaigns         Campaign[]            @relation("CampaignCloser")
   createdPledges          Pledge[]              @relation("PledgeCreator")
   cancelledPledges        Pledge[]              @relation("PledgeCanceller")
+  createdChandaPlans      ChandaPlan[]          @relation("ChandaPlanCreator")
+  waivedDues              Due[]                 @relation("DueWaiver")
 
   @@map("users")
 }

@@ -48,6 +48,8 @@ model Membership {
 
   donations          Donation[]
   pledges            Pledge[]
+  chandaPlans        ChandaPlan[]
+  dues               Due[]
 
   // -- Constraints & indices ------------------------------------------------
   /// A user may not hold more than one membership per mosque.

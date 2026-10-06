@@ -19,6 +19,7 @@ import type {
   UpdateDonationInput,
 } from "./donation.validation.js";
 import { syncPledgeStatus } from "../pledge/pledge.service.js";
+import { syncDueStatus } from "../chanda/chanda.service.js";
 
 export interface DonationActor {
   userId: string;
@@ -1107,6 +1108,11 @@ export async function voidDonation(
     // Resync pledge status if this donation was pledged
     if (donation.pledgeId) {
       await syncPledgeStatus(tx, donation.pledgeId);
+    }
+
+    // Resync due status if this donation was for a due
+    if (donation.dueId) {
+      await syncDueStatus(tx, donation.dueId);
     }
 
     return {

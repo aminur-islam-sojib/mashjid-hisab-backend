@@ -24,6 +24,7 @@ import {
 } from "../expense/expense.service.js";
 import { TRANSFER_PAIR_INCLUDE } from "../transfer/transfer.service.js";
 import { syncPledgeStatus } from "../pledge/pledge.service.js";
+import { syncDueStatus } from "../chanda/chanda.service.js";
 import type {
   GetTransactionsQueryInput,
   GetPendingTransactionsQueryInput,
@@ -1082,6 +1083,10 @@ export async function approveTransaction(
 
       if (donation.pledgeId) {
         await syncPledgeStatus(tx, donation.pledgeId);
+      }
+
+      if (donation.dueId) {
+        await syncDueStatus(tx, donation.dueId);
       }
 
       return updatedDonation;
