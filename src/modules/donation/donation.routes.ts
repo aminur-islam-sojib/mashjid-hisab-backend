@@ -13,6 +13,7 @@ import {
 import {
   createDonationHandler,
   getDonationByIdHandler,
+  getDonationReceiptHandler,
   getMosqueDonationsHandler,
   voidDonationHandler,
   updateDonationHandler,
@@ -57,6 +58,20 @@ donationRouter.get(
   authenticate,
   requireMosqueMembership(),
   getDonationByIdHandler,
+);
+
+/**
+ * GET /api/mosques/:mosqueId/donations/:donationId/receipt AND GET /api/donations/:id/receipt
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER; MEMBER (own only)
+ *
+ * Returns receipt data (mosque, donor, amount, fund, receipt no., verification code)
+ * for the client to render or print.
+ */
+donationRouter.get(
+  "/:donationId/receipt",
+  authenticate,
+  requireMosqueMembership(),
+  getDonationReceiptHandler,
 );
 
 /**

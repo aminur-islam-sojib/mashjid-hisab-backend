@@ -13,6 +13,7 @@ import {
   validateDonationIdParam,
   validateGetMosqueDonationsQuery,
   validateUpdateDonationInput,
+  validateVoidDonationInput,
 } from "./donation.validation.js";
 import {
   createDonation,
@@ -20,6 +21,7 @@ import {
   getMosqueDonations,
   voidDonation,
   updateDonation,
+  getDonationReceipt,
 } from "./donation.service.js";
 
 /**
@@ -136,26 +138,26 @@ export const getMosqueDonationsHandler = catchAsync(
 );
 
 /**
- * POST /api/mosques/:mosqueId/donations/:donationId/void
- * Access: Authenticated + MOSQUE_ADMIN, TREASURER
+ * GET /api/mosques/:mosqueId/donations/:donationId/receipt AND GET /api/donations/:id/receipt
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER; MEMBER (own only)
  *
- * Voids a posted donation entry with audit reason.
+ * Returns receipt data (mosque, donor, amount, fund, receipt no., verification code)
+ * for client-side rendering or printing.
  */
-export const voidDonationHandler = catchAsync(
+export const getDonationReceiptHandler = catchAsync(
   async (req: Request, res: Response): Promise<void> => {
     const mosqueId =
       req.mosqueId ||
-      (req.params["mosqueId"] ? validateMosqueIdParam(req.params["mosqueId"]) : undefined);
+      (req.params["mosqueId"] ? validateMosqueIdParam(req.params["mosqueId"]) : undefined) ||
+      (typeof req.query["mosqueId"] === "string" ? validateMosqueIdParam(req.query["mosqueId"]) : undefined);
 
     if (!mosqueId) {
       throw HttpError.badRequest("Mosque ID is required.", "MISSING_MOSQUE_ID");
     }
 
     const donationId = validateDonationIdParam(req.params["donationId"] || req.params["id"]);
-    const { validateVoidDonationInput } = await import("./donation.validation.js");
-    const { reason } = validateVoidDonationInput(req.body);
 
-    const donation = await voidDonation(mosqueId, donationId, reason, {
+    const receipt = await getDonationReceipt(mosqueId, donationId, {
       userId: req.user!.sub,
       role: req.membership!.role,
       membershipId: req.membership?.id,
@@ -163,8 +165,46 @@ export const voidDonationHandler = catchAsync(
 
     sendResponse(res, {
       statusCode: 200,
-      message: "Donation voided successfully.",
-      data: donation,
+      message: "Donation receipt data retrieved successfully.",
+      data: receipt,
+    });
+  },
+);
+
+/**
+ * POST /api/mosques/:mosqueId/donations/:donationId/void AND POST /api/donations/:id/void
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER
+ *
+ * Voids a posted donation entry with audit reason and creates an offsetting reversal entry.
+ */
+export const voidDonationHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId =
+      req.mosqueId ||
+      (req.params["mosqueId"] ? validateMosqueIdParam(req.params["mosqueId"]) : undefined) ||
+      (typeof req.body?.mosqueId === "string" ? validateMosqueIdParam(req.body.mosqueId) : undefined);
+
+    if (!mosqueId) {
+      throw HttpError.badRequest("Mosque ID is required.", "MISSING_MOSQUE_ID");
+    }
+
+    const donationId = validateDonationIdParam(req.params["donationId"] || req.params["id"]);
+    const { reason } = validateVoidDonationInput(req.body);
+
+    const result = await voidDonation(mosqueId, donationId, reason, {
+      userId: req.user!.sub,
+      role: req.membership!.role,
+      membershipId: req.membership?.id,
+    });
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Donation voided successfully and offsetting reversal entry created.",
+      data: {
+        ...result.voidedDonation,
+        voidedDonation: result.voidedDonation,
+        reversalEntry: result.reversalEntry,
+      },
     });
   },
 );

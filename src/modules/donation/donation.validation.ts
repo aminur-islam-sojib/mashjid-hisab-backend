@@ -511,8 +511,17 @@ export function validateVoidDonationInput(body: unknown): VoidDonationInput {
     throw HttpError.badRequest("Void reason is required.", "MISSING_VOID_REASON");
   }
   const reason = raw["reason"].trim();
+  if (reason.length < 3) {
+    throw HttpError.badRequest(
+      "Void reason must be at least 3 characters.",
+      "INVALID_VOID_REASON",
+    );
+  }
   if (reason.length > 500) {
-    throw HttpError.badRequest("Void reason cannot exceed 500 characters.", "INVALID_VOID_REASON");
+    throw HttpError.badRequest(
+      "Void reason cannot exceed 500 characters.",
+      "INVALID_VOID_REASON",
+    );
   }
   return { reason };
 }

@@ -72,6 +72,11 @@ model Donation {
   voidedBy           User?          @relation("DonationVoider", fields: [voidedById], references: [id], onDelete: SetNull)
   voidedAt           DateTime?
 
+  // Reversal linkage (for voided entries and their offsetting reversals)
+  reversalOfId       String?        @unique
+  reversalOf         Donation?      @relation("DonationReversal", fields: [reversalOfId], references: [id], onDelete: SetNull)
+  reversalEntry      Donation?      @relation("DonationReversal")
+
   // Audit trail
   createdById        String?
   createdBy          User?          @relation("DonationRecorder", fields: [createdById], references: [id], onDelete: SetNull)

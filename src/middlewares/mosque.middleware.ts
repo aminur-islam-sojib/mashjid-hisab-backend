@@ -123,15 +123,55 @@ export function requireMosqueMembership(
         );
       }
 
-      // 2. Extract mosqueId from URL parameters, body, or headers
+      // 2. Extract mosqueId from URL parameters, body, query, or headers
       const bodyMosqueId =
         req.body && typeof req.body === "object" && typeof (req.body as Record<string, unknown>)["mosqueId"] === "string"
           ? ((req.body as Record<string, unknown>)["mosqueId"] as string)
           : undefined;
       const headerMosqueId =
         typeof req.headers["x-mosque-id"] === "string" ? req.headers["x-mosque-id"] : undefined;
+      const queryMosqueId =
+        typeof req.query["mosqueId"] === "string" ? (req.query["mosqueId"] as string) : undefined;
 
-      const mosqueId = req.params["mosqueId"] || req.params["id"] || bodyMosqueId || headerMosqueId;
+      const paramMosqueId =
+        typeof req.params["mosqueId"] === "string" ? req.params["mosqueId"] : undefined;
+      const paramDonationId =
+        typeof req.params["donationId"] === "string" ? req.params["donationId"] : undefined;
+      const paramId =
+        typeof req.params["id"] === "string" ? req.params["id"] : undefined;
+
+      let mosqueId = paramMosqueId || queryMosqueId || bodyMosqueId || headerMosqueId;
+
+      if (!mosqueId && paramDonationId) {
+        const donationRecord = await prisma.donation.findUnique({
+          where: { id: paramDonationId },
+          select: { mosqueId: true },
+        });
+        if (donationRecord) {
+          mosqueId = donationRecord.mosqueId;
+        }
+      }
+
+      if (!mosqueId && paramId) {
+        const mosqueRecord = await prisma.mosque.findFirst({
+          where: { OR: [{ id: paramId }, { slug: paramId }] },
+          select: { id: true },
+        });
+        if (mosqueRecord) {
+          mosqueId = mosqueRecord.id;
+        } else {
+          const donationRecord = await prisma.donation.findUnique({
+            where: { id: paramId },
+            select: { mosqueId: true },
+          });
+          if (donationRecord) {
+            mosqueId = donationRecord.mosqueId;
+          } else {
+            mosqueId = paramId;
+          }
+        }
+      }
+
       if (!mosqueId || typeof mosqueId !== "string" || !mosqueId.trim()) {
         throw HttpError.badRequest(
           "Route is missing required mosqueId identifier.",

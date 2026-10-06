@@ -1,7 +1,5 @@
-// ---------------------------------------------------------------------------
-// Donation Service — Mosque Income & Collections Management
-// ---------------------------------------------------------------------------
-
+import { createHmac } from "node:crypto";
+import config from "../../config/index.js";
 import { prisma, isPrismaP2002 } from "../../lib/prisma.js";
 import { HttpError } from "../../errors/HttpError.js";
 import {
@@ -35,6 +33,62 @@ export interface VoidInfo {
     name: string;
     email: string | null;
   } | null;
+  reversalReceiptNumber?: string | null;
+}
+
+export interface ReceiptDonorData {
+  type: "MEMBER" | "FAMILY" | "WALK_IN" | "ANONYMOUS";
+  name: string;
+  phone: string | null;
+  email: string | null;
+  memberId: string | null;
+  familyId: string | null;
+  isAnonymousPublic: boolean;
+}
+
+export interface DonationReceiptData {
+  receiptNumber: string;
+  verificationCode: string;
+  date: Date;
+  issuedAt: Date;
+  status: DonationStatus;
+  isVoided: boolean;
+  voidInfo: VoidInfo | null;
+  mosque: {
+    id: string;
+    name: string;
+    slug: string;
+    address: string | null;
+    timezone: string;
+  };
+  donor: ReceiptDonorData;
+  amount: {
+    raw: string;
+    formatted: string;
+    currency: string;
+  };
+  fund: {
+    id: string;
+    name: string;
+    isRestricted: boolean;
+  };
+  category: {
+    id: string;
+    name: string;
+  };
+  account: {
+    id: string;
+    name: string;
+    accountNumber: string | null;
+  };
+  source: DonationSource;
+  notes: string | null;
+  reversalOfReceiptNumber: string | null;
+}
+
+export interface VoidDonationResult {
+  voidedDonation: DonationResponseItem;
+  reversalEntry: DonationResponseItem;
 }
 
 export interface DonationResponseItem {
@@ -60,6 +114,9 @@ export interface DonationResponseItem {
   notes: string | null;
   attachments: string[];
   voidInfo: VoidInfo | null;
+  reversalOfId?: string | null;
+  reversalOfReceiptNumber?: string | null;
+  reversalEntryReceiptNumber?: string | null;
   createdById: string | null;
   postedById: string | null;
   postedAt: Date | null;
@@ -324,6 +381,90 @@ export async function generateNextReceiptNumber(
 }
 
 /**
+ * Reusable Prisma relation inclusion selector for consistent donation data across endpoints.
+ */
+export const DONATION_DEFAULT_INCLUDE = {
+  account: { select: { id: true, name: true, type: true, accountNumber: true } },
+  fund: { select: { id: true, name: true, type: true, isRestricted: true } },
+  category: { select: { id: true, name: true, type: true } },
+  member: {
+    select: {
+      id: true,
+      userId: true,
+      user: { select: { id: true, name: true, email: true, phone: true } },
+    },
+  },
+  family: { select: { id: true, name: true } },
+  createdBy: { select: { id: true, name: true } },
+  postedBy: { select: { id: true, name: true } },
+  voidedBy: { select: { id: true, name: true, email: true } },
+  reversalOf: { select: { id: true, receiptNumber: true } },
+  reversalEntry: { select: { id: true, receiptNumber: true } },
+} as const;
+
+/**
+ * Evaluates whether a given donation date falls within a closed accounting period.
+ *
+ * Rules:
+ *  1. If `mosque.closedPeriodUntil` is set, any date on or before that threshold is closed.
+ *  2. If the transaction falls into a past fiscal year (before current fiscal year start),
+ *     the period is automatically considered closed.
+ */
+export function isDateInClosedPeriod(
+  donationDate: Date,
+  mosque: {
+    closedPeriodUntil?: Date | null;
+    fiscalYearStart?: number | null;
+  },
+): boolean {
+  const targetDate = new Date(donationDate);
+
+  // 1. Explicitly configured closed period
+  if (mosque.closedPeriodUntil) {
+    const closedUntil = new Date(mosque.closedPeriodUntil);
+    if (targetDate.getTime() <= closedUntil.getTime()) {
+      return true;
+    }
+  }
+
+  // 2. Fiscal year boundary
+  const fyStartMonth = mosque.fiscalYearStart ?? 7; // 1-12 (7 = July by default)
+  const now = new Date();
+  const currentCalYear = now.getFullYear();
+  const currentCalMonth = now.getMonth() + 1; // 1-12
+
+  let currentFyStartYear = currentCalYear;
+  if (currentCalMonth < fyStartMonth) {
+    currentFyStartYear = currentCalYear - 1;
+  }
+
+  const currentFyStartDate = new Date(Date.UTC(currentFyStartYear, fyStartMonth - 1, 1, 0, 0, 0, 0));
+
+  if (targetDate.getTime() < currentFyStartDate.getTime()) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Generates an HMAC-SHA256 based cryptographic verification code for donation receipts.
+ * Format: VC-XXXX-XXXX-XXXX
+ */
+export function generateReceiptVerificationCode(params: {
+  id: string;
+  receiptNumber: string;
+  amount: string;
+  mosqueId: string;
+  createdAt: Date;
+}): string {
+  const secret = config.JWT_ACCESS_SECRET || "receipt-verification-salt";
+  const payload = `${params.id}:${params.receiptNumber}:${params.amount}:${params.mosqueId}:${params.createdAt.toISOString()}`;
+  const hmac = createHmac("sha256", secret).update(payload).digest("hex").toUpperCase();
+  return `VC-${hmac.substring(0, 4)}-${hmac.substring(4, 8)}-${hmac.substring(8, 12)}`;
+}
+
+/**
  * Maps a Prisma donation record with relations to the public response shape.
  */
 function mapDonationResponse(donation: any): DonationResponseItem {
@@ -339,6 +480,7 @@ function mapDonationResponse(donation: any): DonationResponseItem {
                 email: donation.voidedBy.email ?? null,
               }
             : null,
+          reversalReceiptNumber: donation.reversalEntry?.receiptNumber ?? null,
         }
       : null;
 
@@ -365,6 +507,9 @@ function mapDonationResponse(donation: any): DonationResponseItem {
     notes: donation.notes,
     attachments: donation.attachments ?? [],
     voidInfo,
+    reversalOfId: donation.reversalOfId ?? null,
+    reversalOfReceiptNumber: donation.reversalOf?.receiptNumber ?? null,
+    reversalEntryReceiptNumber: donation.reversalEntry?.receiptNumber ?? null,
     createdById: donation.createdById,
     postedById: donation.postedById,
     postedAt: donation.postedAt,
@@ -811,17 +956,47 @@ export async function getMosqueDonations(
 }
 
 /**
- * Voids a posted donation entry.
+ * Voids a posted donation entry and creates an offsetting reversal entry in the ledger.
  *
- * Only MOSQUE_ADMIN or TREASURER can void a donation.
+ * Rules & Guarantees:
+ *  - Only MOSQUE_ADMIN or TREASURER can void donations.
+ *  - Reason is required.
+ *  - Fails with 400 ALREADY_VOIDED if donation is already voided.
+ *  - Fails with 400 CANNOT_VOID_REVERSAL if donation is itself a reversal entry.
+ *  - Fails with 400 CANNOT_VOID_PENDING if donation is still in PENDING status.
+ *  - Fails with 400 PERIOD_CLOSED if donation date falls within a closed accounting period
+ *    or previous fiscal year.
+ *  - Performs an atomic Prisma transaction that marks original record as VOIDED,
+ *    and inserts an offsetting reversal entry (negative amount, status POSTED, receiptNumber REV-...)
+ *    linked via reversalOfId.
  */
 export async function voidDonation(
   mosqueId: string,
   donationId: string,
   reason: string,
   actor: DonationActor,
-): Promise<DonationResponseItem> {
+): Promise<VoidDonationResult> {
   const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  // Financial operator role guard
+  const isFinancialOperator =
+    actor.role === Role.MOSQUE_ADMIN || actor.role === Role.TREASURER;
+  if (!isFinancialOperator) {
+    throw HttpError.forbidden(
+      `Access denied. Role '${actor.role}' cannot void donation records.`,
+      "FORBIDDEN_ROLE",
+    );
+  }
+
+  // Fetch mosque accounting period boundaries
+  const mosque = await prisma.mosque.findUnique({
+    where: { id: resolvedMosqueId },
+    select: { id: true, closedPeriodUntil: true, fiscalYearStart: true },
+  });
+
+  if (!mosque) {
+    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
+  }
 
   const donation = await prisma.donation.findFirst({
     where: {
@@ -838,32 +1013,243 @@ export async function voidDonation(
     throw HttpError.badRequest("Donation has already been voided.", "ALREADY_VOIDED");
   }
 
-  const updated = await prisma.donation.update({
-    where: { id: donationId },
-    data: {
-      status: DonationStatus.VOIDED,
-      voidReason: reason,
-      voidedById: actor.userId,
-      voidedAt: new Date(),
+  if (donation.status === DonationStatus.PENDING) {
+    throw HttpError.badRequest(
+      "Cannot void an unposted pending donation. Reject or delete the pending record instead.",
+      "CANNOT_VOID_PENDING",
+    );
+  }
+
+  if (donation.amount < 0n || donation.reversalOfId) {
+    throw HttpError.badRequest(
+      "Cannot void a reversal entry.",
+      "CANNOT_VOID_REVERSAL",
+    );
+  }
+
+  if (isDateInClosedPeriod(donation.date, mosque)) {
+    throw HttpError.badRequest(
+      "Cannot void a donation from a closed accounting period or previous fiscal year.",
+      "PERIOD_CLOSED",
+    );
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    // 1. Mark original donation as VOIDED
+    const voided = await tx.donation.update({
+      where: { id: donationId },
+      data: {
+        status: DonationStatus.VOIDED,
+        voidReason: reason,
+        voidedById: actor.userId,
+        voidedAt: new Date(),
+      },
+      include: DONATION_DEFAULT_INCLUDE,
+    });
+
+    // 2. Generate unique reversal receipt number
+    const reversalReceiptNumber = donation.receiptNumber
+      ? `REV-${donation.receiptNumber}`
+      : `REV-${donation.id.slice(0, 8).toUpperCase()}`;
+
+    // 3. Create offsetting reversal entry
+    const reversal = await tx.donation.create({
+      data: {
+        mosqueId: resolvedMosqueId,
+        amount: -donation.amount,
+        accountId: donation.accountId,
+        fundId: donation.fundId,
+        categoryId: donation.categoryId,
+        date: new Date(),
+        memberId: donation.memberId,
+        familyId: donation.familyId,
+        donorName: donation.donorName,
+        donorPhone: donation.donorPhone,
+        donorEmail: donation.donorEmail,
+        isAnonymousPublic: donation.isAnonymousPublic,
+        campaignId: donation.campaignId,
+        dueId: donation.dueId,
+        pledgeId: donation.pledgeId,
+        source: donation.source,
+        status: DonationStatus.POSTED,
+        receiptNumber: reversalReceiptNumber,
+        notes: `Reversal entry for receipt ${donation.receiptNumber ?? donation.id}: ${reason}`,
+        attachments: donation.attachments,
+        reversalOfId: donation.id,
+        createdById: actor.userId,
+        postedById: actor.userId,
+        postedAt: new Date(),
+      },
+      include: DONATION_DEFAULT_INCLUDE,
+    });
+
+    // Attach created reversal entry to voided record for complete linkage in return payload
+    (voided as any).reversalEntry = reversal;
+
+    return {
+      voidedDonation: mapDonationResponse(voided),
+      reversalEntry: mapDonationResponse(reversal),
+    };
+  });
+
+  return result;
+}
+
+/**
+ * Returns structured donation receipt data for client rendering or printing.
+ *
+ * Rules & Guarantees:
+ *  - Only MOSQUE_ADMIN, TREASURER, or MEMBER (own only) can view receipt.
+ *  - Fails with 400 RECEIPT_NOT_AVAILABLE if donation is pending or has no receiptNumber.
+ *  - Fails with 403 FORBIDDEN if member is not the owner of the donation.
+ *  - Includes mosque details, donor details, formatted and minor unit amounts,
+ *    fund, category, account, void info (if voided), and cryptographic verification code.
+ */
+export async function getDonationReceipt(
+  mosqueId: string,
+  donationId: string,
+  actor: DonationActor,
+): Promise<DonationReceiptData> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  const donation = await prisma.donation.findFirst({
+    where: {
+      id: donationId,
+      mosqueId: resolvedMosqueId,
     },
     include: {
-      account: { select: { id: true, name: true, type: true, accountNumber: true } },
-      fund: { select: { id: true, name: true, type: true, isRestricted: true } },
-      category: { select: { id: true, name: true, type: true } },
-      member: {
+      mosque: {
         select: {
           id: true,
-          user: { select: { id: true, name: true, email: true, phone: true } },
+          name: true,
+          slug: true,
+          address: true,
+          timezone: true,
         },
       },
-      family: { select: { id: true, name: true } },
-      createdBy: { select: { id: true, name: true } },
-      postedBy: { select: { id: true, name: true } },
-      voidedBy: { select: { id: true, name: true, email: true } },
+      ...DONATION_DEFAULT_INCLUDE,
     },
   });
 
-  return mapDonationResponse(updated);
+  if (!donation) {
+    throw HttpError.notFound("Donation record not found.", "DONATION_NOT_FOUND");
+  }
+
+  // Must have receiptNumber (cannot issue receipt for pending/unposted entries)
+  if (!donation.receiptNumber) {
+    throw HttpError.badRequest(
+      "Receipt is not available for unposted or pending donations.",
+      "RECEIPT_NOT_AVAILABLE",
+    );
+  }
+
+  // Authorization check: ADMIN and TREASURER can view any receipt; MEMBER can only view own
+  const isFinancialOperator =
+    actor.role === Role.MOSQUE_ADMIN || actor.role === Role.TREASURER;
+
+  if (!isFinancialOperator) {
+    const isOwnDonation =
+      (actor.membershipId && donation.memberId === actor.membershipId) ||
+      donation.member?.userId === actor.userId ||
+      donation.member?.user?.id === actor.userId ||
+      donation.createdById === actor.userId;
+
+    if (!isOwnDonation) {
+      throw HttpError.forbidden(
+        "Access denied. Members can only access receipts for their own donations.",
+        "FORBIDDEN",
+      );
+    }
+  }
+
+  const verificationCode = generateReceiptVerificationCode({
+    id: donation.id,
+    receiptNumber: donation.receiptNumber,
+    amount: donation.amount.toString(),
+    mosqueId: donation.mosqueId,
+    createdAt: donation.createdAt,
+  });
+
+  let donorType: "MEMBER" | "FAMILY" | "WALK_IN" | "ANONYMOUS" = "WALK_IN";
+  let donorName = donation.donorName || "Walk-in Donor";
+  let donorPhone = donation.donorPhone ?? null;
+  let donorEmail = donation.donorEmail ?? null;
+
+  if (donation.memberId && donation.member) {
+    donorType = "MEMBER";
+    donorName = donation.member.user?.name || donorName;
+    donorPhone = donation.donorPhone || donation.member.user?.phone || null;
+    donorEmail = donation.donorEmail || donation.member.user?.email || null;
+  } else if (donation.familyId && donation.family) {
+    donorType = "FAMILY";
+    donorName = donation.family.name || donorName;
+  } else if (donation.isAnonymousPublic) {
+    donorType = "ANONYMOUS";
+  }
+
+  const isVoided = donation.status === DonationStatus.VOIDED || !!donation.voidedAt;
+  const voidInfo: VoidInfo | null = isVoided
+    ? {
+        voidedAt: donation.voidedAt ?? donation.updatedAt,
+        voidReason: donation.voidReason ?? null,
+        voidedBy: donation.voidedBy
+          ? {
+              id: donation.voidedBy.id,
+              name: donation.voidedBy.name,
+              email: donation.voidedBy.email ?? null,
+            }
+          : null,
+        reversalReceiptNumber: donation.reversalEntry?.receiptNumber ?? null,
+      }
+    : null;
+
+  return {
+    receiptNumber: donation.receiptNumber,
+    verificationCode,
+    date: donation.date,
+    issuedAt: donation.postedAt ?? donation.createdAt,
+    status: donation.status,
+    isVoided,
+    voidInfo,
+    mosque: {
+      id: donation.mosque.id,
+      name: donation.mosque.name,
+      slug: donation.mosque.slug,
+      address: donation.mosque.address,
+      timezone: donation.mosque.timezone,
+    },
+    donor: {
+      type: donorType,
+      name: donorName,
+      phone: donorPhone,
+      email: donorEmail,
+      memberId: donation.memberId,
+      familyId: donation.familyId,
+      isAnonymousPublic: donation.isAnonymousPublic,
+    },
+    amount: {
+      raw: donation.amount.toString(),
+      formatted: (Number(donation.amount) / 100).toFixed(2),
+      currency: "BDT",
+    },
+    fund: {
+      id: donation.fund.id,
+      name: donation.fund.name,
+      isRestricted: donation.fund.isRestricted,
+    },
+    category: {
+      id: donation.category.id,
+      name: donation.category.name,
+    },
+    account: {
+      id: donation.account.id,
+      name: donation.account.name,
+      accountNumber: donation.account.accountNumber,
+    },
+    source: donation.source,
+    notes: donation.notes,
+    reversalOfReceiptNumber: donation.reversalOf?.receiptNumber ?? null,
+  };
 }
 
 /**

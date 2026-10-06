@@ -25,6 +25,9 @@ model Mosque {
   /// Default: 7 (July), matching the Bangladesh Government fiscal calendar.
   fiscalYearStart Int @default(7)
 
+  /// Accounting books closed up to this date. Transactions on or before this date are frozen.
+  closedPeriodUntil DateTime?
+
   // -- Soft delete / lifecycle ----------------------------------------------
   isArchived Boolean   @default(false)
   archivedAt DateTime?
