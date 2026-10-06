@@ -320,3 +320,189 @@ export function validateAcceptMembershipInviteInput(
   return input;
 }
 
+// ---------------------------------------------------------------------------
+// Admin Direct-Create Member Validation
+// ---------------------------------------------------------------------------
+
+export interface DirectCreateMemberInput {
+  name?: string;
+  email?: string;
+  phone?: string;
+  password?: string;
+  role?: Role;
+  familyMemberId?: string;
+}
+
+/**
+ * Validates payload for POST /api/mosques/:mosqueId/members/direct
+ *
+ * Rules:
+ * - familyMemberId: optional string.
+ * - name: required if familyMemberId is omitted; optional if familyMemberId is provided (inherits family member's name).
+ * - email: optional valid email address.
+ * - phone: optional valid phone number (7-15 digits, optional leading +).
+ * - contact: at least one of email, phone, or familyMemberId must be provided.
+ * - password: optional string. If provided, must be >= 8 chars, 1 uppercase, 1 lowercase, 1 digit.
+ *   If omitted, system will generate a secure temporary password.
+ * - role: optional Role, defaults to Role.MEMBER, must be in ALLOWED_MEMBERSHIP_ROLES.
+ */
+export function validateDirectCreateMemberInput(
+  body: unknown,
+): DirectCreateMemberInput {
+  if (!body || typeof body !== "object") {
+    throw HttpError.badRequest("Request body must be a JSON object.");
+  }
+
+  const raw = body as Record<string, unknown>;
+  const issues: ValidationIssue[] = [];
+
+  // -- familyMemberId (optional) ---------------------------------------------
+  let familyMemberId: string | undefined;
+  if (
+    raw["familyMemberId"] !== undefined &&
+    raw["familyMemberId"] !== null &&
+    raw["familyMemberId"] !== ""
+  ) {
+    if (typeof raw["familyMemberId"] !== "string" || !raw["familyMemberId"].trim()) {
+      issues.push({
+        field: "familyMemberId",
+        issue: "Family member identifier must be a non-empty string.",
+      });
+    } else {
+      familyMemberId = raw["familyMemberId"].trim();
+    }
+  }
+
+  // -- name ------------------------------------------------------------------
+  let name: string | undefined;
+  if (raw["name"] !== undefined && raw["name"] !== null && raw["name"] !== "") {
+    if (typeof raw["name"] !== "string") {
+      issues.push({ field: "name", issue: "Name must be a string." });
+    } else {
+      const trimmedName = raw["name"].trim();
+      if (trimmedName.length < 2 || trimmedName.length > 100) {
+        issues.push({
+          field: "name",
+          issue: "Name must be between 2 and 100 characters.",
+        });
+      } else {
+        name = trimmedName;
+      }
+    }
+  } else if (!familyMemberId) {
+    issues.push({
+      field: "name",
+      issue: "Name is required when familyMemberId is not provided.",
+    });
+  }
+
+  // -- email (optional) ------------------------------------------------------
+  let email: string | undefined;
+  if (raw["email"] !== undefined && raw["email"] !== null && raw["email"] !== "") {
+    if (typeof raw["email"] !== "string") {
+      issues.push({ field: "email", issue: "Email must be a valid string." });
+    } else {
+      const trimmedEmail = raw["email"].trim().toLowerCase();
+      if (!EMAIL_RE.test(trimmedEmail)) {
+        issues.push({ field: "email", issue: "Must be a valid email address." });
+      } else {
+        email = trimmedEmail;
+      }
+    }
+  }
+
+  // -- phone (optional) ------------------------------------------------------
+  let phone: string | undefined;
+  if (raw["phone"] !== undefined && raw["phone"] !== null && raw["phone"] !== "") {
+    const rawPhone = String(raw["phone"]).trim();
+    if (!PHONE_RE.test(rawPhone)) {
+      issues.push({
+        field: "phone",
+        issue: "Must be a valid phone number (7–15 digits, optional leading +).",
+      });
+    } else {
+      phone = rawPhone;
+    }
+  }
+
+  // At least one contact method or a familyMemberId must be provided
+  if (!email && !phone && !familyMemberId) {
+    issues.push({
+      field: "email",
+      issue: "At least one contact method (email or phone) is required to create a member account.",
+    });
+  }
+
+  // -- password (optional) ---------------------------------------------------
+  let password: string | undefined;
+  if (raw["password"] !== undefined && raw["password"] !== null && raw["password"] !== "") {
+    if (typeof raw["password"] !== "string") {
+      issues.push({ field: "password", issue: "Password must be a string." });
+    } else {
+      const rawPassword = raw["password"];
+      if (rawPassword.length < 8) {
+        issues.push({
+          field: "password",
+          issue: "Must be at least 8 characters.",
+        });
+      } else {
+        if (!/[A-Z]/.test(rawPassword)) {
+          issues.push({
+            field: "password",
+            issue: "Must contain at least one uppercase letter.",
+          });
+        }
+        if (!/[a-z]/.test(rawPassword)) {
+          issues.push({
+            field: "password",
+            issue: "Must contain at least one lowercase letter.",
+          });
+        }
+        if (!/[0-9]/.test(rawPassword)) {
+          issues.push({
+            field: "password",
+            issue: "Must contain at least one digit.",
+          });
+        }
+      }
+      password = rawPassword;
+    }
+  }
+
+  // -- role (optional, defaults to MEMBER) -----------------------------------
+  let role: Role = Role.MEMBER;
+  if (raw["role"] !== undefined && raw["role"] !== null && raw["role"] !== "") {
+    if (typeof raw["role"] !== "string") {
+      issues.push({ field: "role", issue: "Role must be a string." });
+    } else {
+      const roleUpper = raw["role"].trim().toUpperCase();
+      if (roleUpper === Role.SUPER_ADMIN) {
+        issues.push({
+          field: "role",
+          issue: "SUPER_ADMIN is a platform-level role and cannot be assigned to a mosque membership.",
+        });
+      } else if (!ALLOWED_MEMBERSHIP_ROLES.includes(roleUpper as Role)) {
+        issues.push({
+          field: "role",
+          issue: `Invalid role '${raw["role"]}'. Allowed membership roles: ${ALLOWED_MEMBERSHIP_ROLES.join(", ")}.`,
+        });
+      } else {
+        role = roleUpper as Role;
+      }
+    }
+  }
+
+  if (issues.length > 0) {
+    throw HttpError.validationError(issues);
+  }
+
+  return {
+    name,
+    email,
+    phone,
+    password,
+    role,
+    familyMemberId,
+  };
+}
+

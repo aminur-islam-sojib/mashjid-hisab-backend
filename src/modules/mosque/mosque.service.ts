@@ -93,7 +93,7 @@ export interface MosqueMemberItem {
   user: {
     id: string;
     name: string;
-    email: string;
+    email: string | null;
     phone: string | null;
     status: UserStatus;
     avatarUrl: string | null;
@@ -101,7 +101,7 @@ export interface MosqueMemberItem {
   invitedBy: {
     id: string;
     name: string;
-    email: string;
+    email: string | null;
   } | null;
 }
 
@@ -116,7 +116,7 @@ export interface UpdatedMembershipResult {
   user: {
     id: string;
     name: string;
-    email: string;
+    email: string | null;
     phone: string | null;
     status: UserStatus;
     avatarUrl: string | null;

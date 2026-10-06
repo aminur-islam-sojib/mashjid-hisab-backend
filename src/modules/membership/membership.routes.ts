@@ -7,6 +7,7 @@ import { authenticate } from "../../middlewares/auth.middleware.js";
 import {
   requireMosqueMembership,
   OVERSIGHT_ROLES,
+  FINANCIAL_OPERATOR_ROLES,
 } from "../../middlewares/mosque.middleware.js";
 import { Role } from "../../../generated/prisma/client.js";
 import {
@@ -16,6 +17,7 @@ import {
   removeMemberHandler,
   createMembershipInviteHandler,
   acceptMembershipInviteHandler,
+  directCreateMemberHandler,
 } from "./membership.controller.js";
 
 const membershipRouter: Router = Router({ mergeParams: true });
@@ -59,6 +61,21 @@ membershipRouter.get(
   authenticate,
   requireMosqueMembership(...OVERSIGHT_ROLES),
   getMosqueMembersHandler,
+);
+
+/**
+ * POST /api/mosques/:mosqueId/members/direct
+ * Access: Authenticated + FINANCIAL_OPERATOR_ROLES (MOSQUE_ADMIN, TREASURER)
+ *
+ * Creates User + Profile + Membership(ACTIVE) in one transaction, by email/phone
+ * + password (admin-set or auto-generated). Sets mustChangePassword: true.
+ * Optionally links to an existing FamilyMember.
+ */
+membershipRouter.post(
+  "/direct",
+  authenticate,
+  requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
+  directCreateMemberHandler,
 );
 
 /**

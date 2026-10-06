@@ -57,7 +57,7 @@ export type PublicMembership = Pick<
 export interface PublicUser {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
   phone: string | null;
   locale: string;
   emailVerified: boolean;

@@ -13,6 +13,7 @@ import {
   validateCreateMembershipInviteInput,
   validateInviteIdParam,
   validateAcceptMembershipInviteInput,
+  validateDirectCreateMemberInput,
 } from "./membership.validation.js";
 import {
   getMosqueMembers,
@@ -21,6 +22,7 @@ import {
   leaveMosque,
   createMembershipInvite,
   acceptMembershipInvite,
+  directCreateMember,
 } from "./membership.service.js";
 
 /**
@@ -156,6 +158,30 @@ export const acceptMembershipInviteHandler = catchAsync(
       statusCode: 200,
       message: result.message,
       data: result.membership,
+    });
+  },
+);
+
+/**
+ * POST /api/mosques/:mosqueId/members/direct
+ * Access: Authenticated + FINANCIAL_OPERATOR_ROLES (MOSQUE_ADMIN, TREASURER)
+ *
+ * Creates User + Profile + Membership(ACTIVE) in one transaction, by email/phone
+ * + password (admin-set or auto-generated). Sets mustChangePassword: true.
+ * Optionally links to an existing FamilyMember.
+ */
+export const directCreateMemberHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const callerUserId = req.user!.sub;
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const input = validateDirectCreateMemberInput(req.body);
+
+    const result = await directCreateMember(callerUserId, mosqueId, input);
+
+    sendResponse(res, {
+      statusCode: 201,
+      message: "Member account created successfully.",
+      data: result,
     });
   },
 );
