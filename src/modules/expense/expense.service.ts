@@ -176,12 +176,24 @@ export async function getAccountBalance(
   if (!account) return 0n;
 
   const donations = await tx.donation.aggregate({
-    where: { accountId, status: DonationStatus.POSTED },
+    where: {
+      accountId,
+      OR: [
+        { status: DonationStatus.POSTED },
+        { status: DonationStatus.VOIDED, reversalEntry: { isNot: null } },
+      ],
+    },
     _sum: { amount: true },
   });
 
   const expenses = await tx.expense.aggregate({
-    where: { accountId, status: ExpenseStatus.POSTED },
+    where: {
+      accountId,
+      OR: [
+        { status: ExpenseStatus.POSTED },
+        { status: ExpenseStatus.VOIDED, reversalEntry: { isNot: null } },
+      ],
+    },
     _sum: { amount: true },
   });
 
@@ -201,12 +213,24 @@ export async function getFundBalance(
   fundId: string,
 ): Promise<bigint> {
   const donations = await tx.donation.aggregate({
-    where: { fundId, status: DonationStatus.POSTED },
+    where: {
+      fundId,
+      OR: [
+        { status: DonationStatus.POSTED },
+        { status: DonationStatus.VOIDED, reversalEntry: { isNot: null } },
+      ],
+    },
     _sum: { amount: true },
   });
 
   const expenses = await tx.expense.aggregate({
-    where: { fundId, status: ExpenseStatus.POSTED },
+    where: {
+      fundId,
+      OR: [
+        { status: ExpenseStatus.POSTED },
+        { status: ExpenseStatus.VOIDED, reversalEntry: { isNot: null } },
+      ],
+    },
     _sum: { amount: true },
   });
 
@@ -954,6 +978,152 @@ export async function updateExpense(
 
   return mapExpenseResponse(updated);
 }
+
+export interface VoidExpenseResult {
+  voidedExpense: ExpenseResponseItem;
+  reversalEntry: ExpenseResponseItem;
+  restoredAccountBalance: string;
+  restoredFundBalance: string;
+}
+
+/**
+ * Voids a posted expense entry and creates an offsetting reversal entry in the ledger.
+ *
+ * Rules & Guarantees:
+ *  - Only MOSQUE_ADMIN can void expenses.
+ *  - Reason is required (min 3 chars).
+ *  - Fails with 400 ALREADY_VOIDED if expense is already voided.
+ *  - Fails with 400 CANNOT_VOID_REVERSAL if expense is itself a reversal entry.
+ *  - Fails with 400 CANNOT_VOID_PENDING if expense is still in PENDING or PENDING_APPROVAL status.
+ *  - Fails with 400 PERIOD_CLOSED if expense date falls within a closed accounting period or previous fiscal year.
+ *  - Performs an atomic Prisma transaction that marks original record as VOIDED,
+ *    and inserts an offsetting reversal entry (negative amount, status POSTED, voucherNo REV-...)
+ *    linked via reversalOfId.
+ *  - Restores the account and fund available balance.
+ */
+export async function voidExpense(
+  mosqueId: string,
+  expenseId: string,
+  reason: string,
+  actor: ExpenseActor,
+): Promise<VoidExpenseResult> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  // Admin-only role guard
+  if (actor.role !== Role.MOSQUE_ADMIN) {
+    throw HttpError.forbidden(
+      `Access denied. Role '${actor.role}' cannot void expense records. Only Mosque Admins can void expenses.`,
+      "FORBIDDEN_ROLE",
+    );
+  }
+
+  // Fetch mosque accounting period boundaries
+  const mosque = await prisma.mosque.findUnique({
+    where: { id: resolvedMosqueId },
+    select: { id: true, closedPeriodUntil: true, fiscalYearStart: true },
+  });
+
+  if (!mosque) {
+    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
+  }
+
+  const expense = await prisma.expense.findFirst({
+    where: {
+      id: expenseId,
+      mosqueId: resolvedMosqueId,
+    },
+  });
+
+  if (!expense) {
+    throw HttpError.notFound("Expense record not found in this mosque.", "EXPENSE_NOT_FOUND");
+  }
+
+  if (expense.status === ExpenseStatus.VOIDED) {
+    throw HttpError.badRequest("Expense has already been voided.", "ALREADY_VOIDED");
+  }
+
+  if (
+    expense.status === ExpenseStatus.PENDING ||
+    expense.status === ExpenseStatus.PENDING_APPROVAL
+  ) {
+    throw HttpError.badRequest(
+      "Cannot void an unposted pending expense. Reject or delete the pending record instead.",
+      "CANNOT_VOID_PENDING",
+    );
+  }
+
+  if (expense.amount < 0n || expense.reversalOfId) {
+    throw HttpError.badRequest(
+      "Cannot void a reversal entry.",
+      "CANNOT_VOID_REVERSAL",
+    );
+  }
+
+  if (isDateInClosedPeriod(expense.date, mosque)) {
+    throw HttpError.badRequest(
+      "Cannot void an expense from a closed accounting period or previous fiscal year.",
+      "PERIOD_CLOSED",
+    );
+  }
+
+  const result = await prisma.$transaction(async (tx) => {
+    // 1. Mark original expense as VOIDED
+    const voided = await tx.expense.update({
+      where: { id: expenseId },
+      data: {
+        status: ExpenseStatus.VOIDED,
+        voidReason: reason,
+        voidedById: actor.userId,
+        voidedAt: new Date(),
+      },
+      include: EXPENSE_DEFAULT_INCLUDE,
+    });
+
+    // 2. Generate unique reversal voucher number
+    const reversalVoucherNo = expense.voucherNo
+      ? `REV-${expense.voucherNo}`
+      : `REV-${expense.id.slice(0, 8).toUpperCase()}`;
+
+    // 3. Create offsetting reversal entry
+    const reversal = await tx.expense.create({
+      data: {
+        mosqueId: resolvedMosqueId,
+        amount: -expense.amount,
+        accountId: expense.accountId,
+        fundId: expense.fundId,
+        categoryId: expense.categoryId,
+        date: new Date(),
+        payee: expense.payee,
+        voucherNo: reversalVoucherNo,
+        status: ExpenseStatus.POSTED,
+        notes: `Reversal entry for voucher ${expense.voucherNo ?? expense.id}: ${reason}`,
+        attachments: expense.attachments,
+        reversalOfId: expense.id,
+        createdById: actor.userId,
+        postedById: actor.userId,
+        postedAt: new Date(),
+      },
+      include: EXPENSE_DEFAULT_INCLUDE,
+    });
+
+    // Attach created reversal entry to voided record for complete linkage in return payload
+    (voided as any).reversalEntry = reversal;
+
+    // Compute restored balances
+    const restoredAccountBalance = await getAccountBalance(tx, expense.accountId);
+    const restoredFundBalance = await getFundBalance(tx, expense.fundId);
+
+    return {
+      voidedExpense: mapExpenseResponse(voided),
+      reversalEntry: mapExpenseResponse(reversal),
+      restoredAccountBalance: restoredAccountBalance.toString(),
+      restoredFundBalance: restoredFundBalance.toString(),
+    };
+  });
+
+  return result;
+}
+
 
 
 

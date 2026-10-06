@@ -9,12 +9,14 @@ import {
   EXPENSE_OPERATOR_ROLES,
   OVERSIGHT_ROLES,
   FINANCIAL_OPERATOR_ROLES,
+  ADMIN_ONLY_ROLES,
 } from "../../middlewares/mosque.middleware.js";
 import {
   createExpenseHandler,
   getMosqueExpensesHandler,
   getExpenseByIdHandler,
   updateExpenseHandler,
+  voidExpenseHandler,
 } from "./expense.controller.js";
 
 const expenseRouter: Router = Router({ mergeParams: true });
@@ -71,6 +73,19 @@ expenseRouter.patch(
   authenticate,
   requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
   updateExpenseHandler,
+);
+
+/**
+ * POST /api/mosques/:mosqueId/expenses/:id/void AND POST /api/expenses/:id/void
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Requires reason. Creates the reversal entry and restores the fund and account balance.
+ */
+expenseRouter.post(
+  "/:id/void",
+  authenticate,
+  requireMosqueMembership(...ADMIN_ONLY_ROLES),
+  voidExpenseHandler,
 );
 
 export default expenseRouter;

@@ -562,4 +562,36 @@ export function validateUpdateExpenseInput(body: unknown): UpdateExpenseInput {
   return result;
 }
 
+export interface VoidExpenseInput {
+  reason: string;
+}
+
+/**
+ * Validates request payload for POST /api/mosques/:mosqueId/expenses/:id/void and POST /api/expenses/:id/void
+ */
+export function validateVoidExpenseInput(body: unknown): VoidExpenseInput {
+  if (!body || typeof body !== "object") {
+    throw HttpError.badRequest("Request body must be a JSON object.");
+  }
+  const raw = body as Record<string, unknown>;
+  if (typeof raw["reason"] !== "string" || !raw["reason"].trim()) {
+    throw HttpError.badRequest("Void reason is required.", "MISSING_VOID_REASON");
+  }
+  const reason = raw["reason"].trim();
+  if (reason.length < 3) {
+    throw HttpError.badRequest(
+      "Void reason must be at least 3 characters.",
+      "INVALID_VOID_REASON",
+    );
+  }
+  if (reason.length > 500) {
+    throw HttpError.badRequest(
+      "Void reason cannot exceed 500 characters.",
+      "INVALID_VOID_REASON",
+    );
+  }
+  return { reason };
+}
+
+
 

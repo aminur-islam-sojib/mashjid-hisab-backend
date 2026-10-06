@@ -13,12 +13,14 @@ import {
   validateGetMosqueExpensesQuery,
   validateExpenseIdParam,
   validateUpdateExpenseInput,
+  validateVoidExpenseInput,
 } from "./expense.validation.js";
 import {
   createExpense,
   getMosqueExpenses,
   getExpenseById,
   updateExpense,
+  voidExpense,
 } from "./expense.service.js";
 
 /**
@@ -190,6 +192,45 @@ export const updateExpenseHandler = catchAsync(
     });
   },
 );
+
+/**
+ * POST /api/mosques/:mosqueId/expenses/:id/void AND POST /api/expenses/:id/void
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Requires reason. Creates the reversal entry and restores the fund and account balance.
+ */
+export const voidExpenseHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId =
+      req.mosqueId ||
+      (req.params["mosqueId"] ? validateMosqueIdParam(req.params["mosqueId"]) : undefined) ||
+      (typeof req.query["mosqueId"] === "string" ? validateMosqueIdParam(req.query["mosqueId"]) : undefined);
+
+    if (!mosqueId) {
+      throw HttpError.badRequest("Mosque ID is required.", "MISSING_MOSQUE_ID");
+    }
+
+    if (!req.user?.sub || !req.membership?.role) {
+      throw HttpError.forbidden("Access denied.", "MEMBERSHIP_REQUIRED");
+    }
+
+    const expenseId = validateExpenseIdParam(req.params["id"] || req.params["expenseId"]);
+    const input = validateVoidExpenseInput(req.body);
+
+    const result = await voidExpense(mosqueId, expenseId, input.reason, {
+      userId: req.user.sub,
+      role: req.membership.role,
+      membershipId: req.membership.id,
+    });
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Expense voided successfully and balance restored.",
+      data: result,
+    });
+  },
+);
+
 
 
 
