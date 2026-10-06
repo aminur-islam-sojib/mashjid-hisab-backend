@@ -13,7 +13,7 @@
 
 import bcrypt from "bcrypt";
 import crypto from "crypto";
-import { prisma } from "../../lib/prisma.js";
+import { prisma, isPrismaP2002, isP2002Target } from "../../lib/prisma.js";
 import config from "../../config/index.js";
 import { HttpError } from "../../errors/HttpError.js";
 import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
@@ -98,7 +98,7 @@ export async function createInviteLink(
   const inviteLink = await prisma.mosqueInviteLink.create({
     data: {
       mosqueId: resolvedMosqueId,
-      role: input.role ?? Role.MEMBER,
+      role: Role.MEMBER,
       tokenHash: hash,
       maxUses: input.maxUses ?? null,
       useCount: 0,
@@ -458,30 +458,53 @@ export async function joinMosqueByInviteLink(
   }
 
   // 3. Atomic Database Transaction
-  const result = await prisma.$transaction(async (tx) => {
-    // 3a. Re-validate token inside transaction
-    const inviteLink = await tx.mosqueInviteLink.findUnique({
-      where: { tokenHash },
-      include: {
-        mosque: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-            isArchived: true,
+  let result;
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      // 3a. Re-validate token inside transaction
+      const inviteLink = await tx.mosqueInviteLink.findUnique({
+        where: { tokenHash },
+        include: {
+          mosque: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              isArchived: true,
+            },
           },
         },
-      },
-    });
+      });
 
-    if (!inviteLink || inviteLink.mosque.isArchived || !isInviteLinkUsable(inviteLink)) {
-      throw HttpError.notFound(
-        "Invite link not found or has expired.",
-        "INVITE_LINK_NOT_FOUND",
-      );
-    }
+      if (!inviteLink || inviteLink.mosque.isArchived || !isInviteLinkUsable(inviteLink)) {
+        throw HttpError.notFound(
+          "Invite link not found or has expired.",
+          "INVITE_LINK_NOT_FOUND",
+        );
+      }
 
-    // 3b. Resolve user (re-check inside tx)
+      // 3b. Atomic concurrency guard on maxUses:
+      // Uses updateMany to atomically increment useCount only while useCount < maxUses.
+      // If updateMany returns count === 0, another concurrent transaction reached maxUses first.
+      const updateResult = await tx.mosqueInviteLink.updateMany({
+        where: {
+          id: inviteLink.id,
+          isArchived: false,
+          ...(inviteLink.maxUses !== null ? { useCount: { lt: inviteLink.maxUses } } : {}),
+        },
+        data: {
+          useCount: { increment: 1 },
+        },
+      });
+
+      if (updateResult.count === 0) {
+        throw HttpError.notFound(
+          "Invite link not found or has reached its maximum uses.",
+          "INVITE_LINK_NOT_FOUND",
+        );
+      }
+
+      // 3c. Resolve user (re-check inside tx)
     let targetUser: {
       id: string;
       name: string;
@@ -549,7 +572,7 @@ export async function joinMosqueByInviteLink(
       targetUser = createdUser;
     }
 
-    // 3c. Check existing membership
+    // 3d. Check existing membership
     const existingMembership = await tx.membership.findUnique({
       where: {
         userId_mosqueId: {
@@ -566,13 +589,27 @@ export async function joinMosqueByInviteLink(
       );
     }
 
+    if (existingMembership?.status === MembershipStatus.PENDING) {
+      throw HttpError.conflict(
+        "You already have a pending join request for this mosque.",
+        "ALREADY_PENDING",
+      );
+    }
+
+    if (existingMembership?.status === MembershipStatus.SUSPENDED) {
+      throw HttpError.forbidden(
+        "Your membership in this mosque has been suspended. Please contact the administrator.",
+        "MEMBERSHIP_SUSPENDED",
+      );
+    }
+
     let membership;
     if (existingMembership) {
       membership = await tx.membership.update({
         where: { id: existingMembership.id },
         data: {
-          role: inviteLink.role,
-          status: MembershipStatus.ACTIVE,
+          role: Role.MEMBER,
+          status: MembershipStatus.PENDING,
           invitedById: inviteLink.createdById ?? existingMembership.invitedById,
         },
         include: {
@@ -586,8 +623,8 @@ export async function joinMosqueByInviteLink(
         data: {
           userId: targetUser.id,
           mosqueId: inviteLink.mosqueId,
-          role: inviteLink.role,
-          status: MembershipStatus.ACTIVE,
+          role: Role.MEMBER,
+          status: MembershipStatus.PENDING,
           invitedById: inviteLink.createdById ?? null,
         },
         include: {
@@ -598,15 +635,8 @@ export async function joinMosqueByInviteLink(
       });
     }
 
-    // 3d. Increment useCount
-    await tx.mosqueInviteLink.update({
-      where: { id: inviteLink.id },
-      data: {
-        useCount: { increment: 1 },
-      },
-    });
-
     // 3e. Session token creation
+    // Note: Since membership is PENDING approval, tokens carry null mosqueId/role.
     let accessToken: string | undefined;
     let refreshToken: string | undefined;
 
@@ -619,8 +649,8 @@ export async function joinMosqueByInviteLink(
       const jti = crypto.randomUUID();
       accessToken = signAccessToken({
         sub: targetUser.id,
-        mosqueId: membership.mosqueId,
-        role: membership.role,
+        mosqueId: null,
+        role: null,
         sessionVersion: targetUser.sessionVersion,
         mustChangePassword: targetUser.mustChangePassword,
       });
@@ -628,8 +658,8 @@ export async function joinMosqueByInviteLink(
       const rawRefreshJwt = signRefreshToken({
         sub: targetUser.id,
         jti,
-        mosqueId: membership.mosqueId,
-        role: membership.role,
+        mosqueId: null,
+        role: null,
         sessionVersion: targetUser.sessionVersion,
       });
 
@@ -639,8 +669,8 @@ export async function joinMosqueByInviteLink(
         data: {
           userId: targetUser.id,
           tokenHash: refreshHash,
-          mosqueId: membership.mosqueId,
-          role: membership.role,
+          mosqueId: null,
+          role: null,
           expiresAt: tokenExpiresAt(config.JWT_REFRESH_EXPIRES_IN_MS),
           userAgent: meta.userAgent,
           ipAddress: meta.ipAddress,
@@ -675,5 +705,32 @@ export async function joinMosqueByInviteLink(
   });
 
   return result;
+  } catch (error) {
+    if (isPrismaP2002(error)) {
+      if (isP2002Target(error, "email")) {
+        throw HttpError.conflict(
+          "An account with this email address already exists.",
+          "AUTH_EMAIL_TAKEN",
+        );
+      }
+      if (isP2002Target(error, "phone")) {
+        throw HttpError.conflict(
+          "An account with this phone number already exists.",
+          "AUTH_PHONE_TAKEN",
+        );
+      }
+      if (isP2002Target(error, "userId_mosqueId") || isP2002Target(error, "mosqueId") || isP2002Target(error, "userId")) {
+        throw HttpError.conflict(
+          "You are already a member or have a pending request for this mosque.",
+          "ALREADY_MEMBER",
+        );
+      }
+      throw HttpError.conflict(
+        "A conflict occurred while processing the join request.",
+        "DUPLICATE_RESOURCE",
+      );
+    }
+    throw error;
+  }
 }
 

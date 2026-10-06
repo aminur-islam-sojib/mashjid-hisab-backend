@@ -31,24 +31,19 @@ export function validateCreateInviteLinkInput(body: unknown): CreateInviteLinkIn
   const issues: ValidationIssue[] = [];
   const input: CreateInviteLinkInput = { role: Role.MEMBER, maxUses: null, expiresAt: null };
 
-  // -- role (optional, defaults to MEMBER) ------------------------------------
+  // -- role (optional, strictly restricted to MEMBER) -----------------------
   if (raw["role"] !== undefined && raw["role"] !== null && raw["role"] !== "") {
     if (typeof raw["role"] !== "string") {
       issues.push({ field: "role", issue: "Role must be a string." });
     } else {
       const roleUpper = raw["role"].trim().toUpperCase();
-      if (roleUpper === Role.SUPER_ADMIN) {
+      if (roleUpper !== Role.MEMBER) {
         issues.push({
           field: "role",
-          issue: "SUPER_ADMIN is a platform-level role and cannot be assigned to a mosque invite link.",
-        });
-      } else if (!Object.values(Role).includes(roleUpper as Role)) {
-        issues.push({
-          field: "role",
-          issue: `Invalid role '${raw["role"]}'. Allowed: ${Object.values(Role).filter((r) => r !== Role.SUPER_ADMIN).join(", ")}.`,
+          issue: "Public invite links can only grant the MEMBER role. Use direct member addition or targeted member invitations to assign administrative or financial roles.",
         });
       } else {
-        input.role = roleUpper as Role;
+        input.role = Role.MEMBER;
       }
     }
   }

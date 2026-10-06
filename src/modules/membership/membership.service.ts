@@ -4,7 +4,7 @@
 
 import bcrypt from "bcrypt";
 import crypto from "crypto";
-import { prisma } from "../../lib/prisma.js";
+import { prisma, isPrismaP2002, isP2002Target } from "../../lib/prisma.js";
 import { HttpError } from "../../errors/HttpError.js";
 import {
   Role,
@@ -713,67 +713,96 @@ export async function directCreateMember(
   const passwordHash = await bcrypt.hash(temporaryPassword, 12);
 
   // 7. Atomic transaction: User + Profile + Membership + FamilyMember link
-  const result = await prisma.$transaction(async (tx) => {
-    // 7a. Create User with mustChangePassword = true and associated Profile
-    const createdUser = await tx.user.create({
-      data: {
-        name: finalName,
-        email: finalEmail ?? null,
-        phone: finalPhone ?? null,
-        passwordHash,
-        emailVerified: false,
-        mustChangePassword: true,
-        status: UserStatus.ACTIVE,
-        sessionVersion: 1,
-        profile: {
-          create: {},
-        },
-      },
-      include: {
-        profile: {
-          select: { avatarUrl: true },
-        },
-      },
-    });
-
-    // 7b. Create ACTIVE Membership
-    const createdMembership = await tx.membership.create({
-      data: {
-        userId: createdUser.id,
-        mosqueId,
-        role: targetRole,
-        status: MembershipStatus.ACTIVE,
-        invitedById: callerUserId,
-      },
-    });
-
-    // 7c. Link FamilyMember if provided
-    let linkedFm: {
-      id: string;
-      name: string;
-      relation: string;
-    } | null = null;
-
-    if (familyMemberRecord) {
-      linkedFm = await tx.familyMember.update({
-        where: { id: familyMemberRecord.id },
+  let result;
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      // 7a. Create User with mustChangePassword = true and associated Profile
+      const createdUser = await tx.user.create({
         data: {
-          linkedMembershipId: createdMembership.id,
+          name: finalName,
+          email: finalEmail ?? null,
+          phone: finalPhone ?? null,
+          passwordHash,
+          emailVerified: false,
+          mustChangePassword: true,
+          status: UserStatus.ACTIVE,
+          sessionVersion: 1,
+          profile: {
+            create: {},
+          },
         },
-        select: {
-          id: true,
-          name: true,
-          relation: true,
+        include: {
+          profile: {
+            select: { avatarUrl: true },
+          },
         },
       });
-    }
 
-    return {
-      user: createdUser,
-      membership: createdMembership,
-      linkedFm,
-    };
-  });
+      // 7b. Create ACTIVE Membership
+      const createdMembership = await tx.membership.create({
+        data: {
+          userId: createdUser.id,
+          mosqueId,
+          role: targetRole,
+          status: MembershipStatus.ACTIVE,
+          invitedById: callerUserId,
+        },
+      });
+
+      // 7c. Link FamilyMember if provided
+      let linkedFm: {
+        id: string;
+        name: string;
+        relation: string;
+      } | null = null;
+
+      if (familyMemberRecord) {
+        linkedFm = await tx.familyMember.update({
+          where: { id: familyMemberRecord.id },
+          data: {
+            linkedMembershipId: createdMembership.id,
+          },
+          select: {
+            id: true,
+            name: true,
+            relation: true,
+          },
+        });
+      }
+
+      return {
+        user: createdUser,
+        membership: createdMembership,
+        linkedFm,
+      };
+    });
+  } catch (error) {
+    if (isPrismaP2002(error)) {
+      if (isP2002Target(error, "email")) {
+        throw HttpError.conflict(
+          "A user with this email address already exists.",
+          "AUTH_EMAIL_TAKEN",
+        );
+      }
+      if (isP2002Target(error, "phone")) {
+        throw HttpError.conflict(
+          "A user with this phone number already exists.",
+          "AUTH_PHONE_TAKEN",
+        );
+      }
+      if (isP2002Target(error, "userId_mosqueId") || isP2002Target(error, "mosqueId") || isP2002Target(error, "userId")) {
+        throw HttpError.conflict(
+          "This user is already a member of this mosque.",
+          "ALREADY_MEMBER",
+        );
+      }
+      throw HttpError.conflict(
+        "A duplicate record conflict occurred while creating the member.",
+        "DUPLICATE_RESOURCE",
+      );
+    }
+    throw error;
+  }
 
   return {
     member: {

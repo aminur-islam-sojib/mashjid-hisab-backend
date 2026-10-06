@@ -18,6 +18,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { HttpError } from "../errors/HttpError.js";
 import config from "../config/index.js";
+import { isPrismaP2002 } from "../lib/prisma.js";
 
 export function globalErrorHandler(
   err: unknown,
@@ -56,6 +57,30 @@ export function globalErrorHandler(
         code: "INVALID_JSON_BODY",
         message:
           "Malformed JSON in request body. Ensure valid JSON syntax: remove trailing commas, use double quotes for property names, and do not wrap the body in extra outer quotes.",
+        details: null,
+      },
+    });
+    return;
+  }
+
+  // -------------------------------------------------------------------------
+  // Prisma unique constraint violation (P2002) safety net
+  // Converts database-level concurrency races into a clean 409 Conflict
+  // -------------------------------------------------------------------------
+  if (isPrismaP2002(err)) {
+    const target = err.meta?.target;
+    let targetField = "resource";
+    if (Array.isArray(target) && target.length > 0) {
+      targetField = target.join(", ");
+    } else if (typeof target === "string") {
+      targetField = target;
+    }
+
+    res.status(409).json({
+      success: false,
+      error: {
+        code: "DUPLICATE_RESOURCE",
+        message: `A conflict occurred: A record with this unique ${targetField} already exists.`,
         details: null,
       },
     });

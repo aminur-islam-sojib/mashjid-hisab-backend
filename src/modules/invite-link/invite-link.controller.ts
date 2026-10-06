@@ -147,8 +147,8 @@ export const joinMosqueByInviteLinkHandler = catchAsync(
     sendResponse(res, {
       statusCode: result.isNewUser ? 201 : 200,
       message: result.isNewUser
-        ? "Account created and joined mosque successfully."
-        : "Successfully joined mosque.",
+        ? "Account created and join request submitted successfully."
+        : "Join request submitted successfully.",
       data: {
         membership: result.membership,
         user: result.user,

@@ -18,7 +18,7 @@ import bcrypt from "bcrypt";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 
-import { prisma } from "../../lib/prisma.js";
+import { prisma, isPrismaP2002, isP2002Target } from "../../lib/prisma.js";
 import config from "../../config/index.js";
 import { HttpError } from "../../errors/HttpError.js";
 import {
@@ -247,8 +247,12 @@ export async function registerUser(
   // 5. Atomic transaction — User + Profile + optional Membership +
   //    EmailVerificationToken + RefreshToken (hash only)
   // -------------------------------------------------------------------------
-  const { createdUser, memberships, rawRefreshJwt } =
-    await prisma.$transaction(async (tx) => {
+  let createdUser;
+  let memberships;
+  let rawRefreshJwt;
+
+  try {
+    const txResult = await prisma.$transaction(async (tx) => {
       // 5a. User + Profile (nested write = 1 round-trip)
       const createdUser = await tx.user.create({
         data: {
@@ -311,6 +315,37 @@ export async function registerUser(
 
       return { createdUser, memberships, rawRefreshJwt };
     });
+
+    createdUser = txResult.createdUser;
+    memberships = txResult.memberships;
+    rawRefreshJwt = txResult.rawRefreshJwt;
+  } catch (error) {
+    if (isPrismaP2002(error)) {
+      if (isP2002Target(error, "email")) {
+        throw HttpError.conflict(
+          "An account with this email address already exists.",
+          "AUTH_EMAIL_TAKEN",
+        );
+      }
+      if (isP2002Target(error, "phone")) {
+        throw HttpError.conflict(
+          "An account with this phone number already exists.",
+          "AUTH_PHONE_TAKEN",
+        );
+      }
+      if (isP2002Target(error, "userId_mosqueId") || isP2002Target(error, "mosqueId")) {
+        throw HttpError.conflict(
+          "A membership for this mosque already exists.",
+          "ALREADY_MEMBER",
+        );
+      }
+      throw HttpError.conflict(
+        "An account with these details already exists.",
+        "AUTH_CONFLICT",
+      );
+    }
+    throw error;
+  }
 
   // -------------------------------------------------------------------------
   // 6. Sign access token (outside transaction — purely in-memory)
