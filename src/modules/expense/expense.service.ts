@@ -15,12 +15,47 @@ import {
 } from "../../../generated/prisma/client.js";
 import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
 import { isDateInClosedPeriod } from "../donation/donation.service.js";
-import type { CreateExpenseInput } from "./expense.validation.js";
+import type {
+  CreateExpenseInput,
+  GetMosqueExpensesQueryInput,
+} from "./expense.validation.js";
 
 export interface ExpenseActor {
   userId: string;
   role: Role;
   membershipId?: string;
+}
+
+export interface ApprovalTrailUser {
+  id: string;
+  name: string;
+  email: string | null;
+}
+
+export interface ApprovalTrailStep {
+  step: "RECORDED" | "SUBMITTED_FOR_APPROVAL" | "APPROVED" | "POSTED" | "VOIDED";
+  label: string;
+  performedBy: ApprovalTrailUser | null;
+  performedAt: Date;
+  details?: Record<string, unknown>;
+}
+
+export interface ExpenseApprovalTrail {
+  status: ExpenseStatus;
+  requiresAdminApproval: boolean;
+  createdBy: ApprovalTrailUser | null;
+  createdAt: Date;
+  approvedBy: ApprovalTrailUser | null;
+  approvedAt: Date | null;
+  postedBy: ApprovalTrailUser | null;
+  postedAt: Date | null;
+  voidInfo: {
+    voidedBy: ApprovalTrailUser | null;
+    voidedAt: Date | null;
+    voidReason: string | null;
+    reversalVoucherNo: string | null;
+  } | null;
+  timeline: ApprovalTrailStep[];
 }
 
 export interface ExpenseResponseItem {
@@ -36,12 +71,15 @@ export interface ExpenseResponseItem {
   status: ExpenseStatus;
   notes: string | null;
   attachments: string[];
+  approvalTrail?: ExpenseApprovalTrail;
   approvedById: string | null;
   approvedAt: Date | null;
   voidReason: string | null;
   voidedById: string | null;
   voidedAt: Date | null;
   reversalOfId: string | null;
+  reversalOfVoucherNo?: string | null;
+  reversalEntryVoucherNo?: string | null;
   createdById: string | null;
   postedById: string | null;
   postedAt: Date | null;
@@ -67,24 +105,59 @@ export interface ExpenseResponseItem {
   createdBy?: {
     id: string;
     name: string;
+    email?: string | null;
   } | null;
   postedBy?: {
     id: string;
     name: string;
+    email?: string | null;
   } | null;
   approvedBy?: {
     id: string;
     name: string;
+    email?: string | null;
   } | null;
+  voidedBy?: {
+    id: string;
+    name: string;
+    email?: string | null;
+  } | null;
+  reversalOf?: {
+    id: string;
+    voucherNo: string | null;
+    amount?: string | null;
+    date?: Date;
+  } | null;
+  reversalEntry?: {
+    id: string;
+    voucherNo: string | null;
+    amount?: string | null;
+    date?: Date;
+  } | null;
+}
+
+export interface PaginatedResult<T> {
+  items: T[];
+  pagination: {
+    totalCount: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPrevPage: boolean;
+  };
 }
 
 export const EXPENSE_DEFAULT_INCLUDE = {
   account: { select: { id: true, name: true, type: true, accountNumber: true } },
   fund: { select: { id: true, name: true, type: true, isRestricted: true } },
   category: { select: { id: true, name: true, type: true } },
-  createdBy: { select: { id: true, name: true } },
-  postedBy: { select: { id: true, name: true } },
-  approvedBy: { select: { id: true, name: true } },
+  createdBy: { select: { id: true, name: true, email: true } },
+  postedBy: { select: { id: true, name: true, email: true } },
+  approvedBy: { select: { id: true, name: true, email: true } },
+  voidedBy: { select: { id: true, name: true, email: true } },
+  reversalOf: { select: { id: true, voucherNo: true, amount: true, date: true } },
+  reversalEntry: { select: { id: true, voucherNo: true, amount: true, date: true } },
 } as const;
 
 /**
@@ -279,9 +352,138 @@ export async function generateVoucherNumber(
 }
 
 /**
+ * Builds the chronological audit and approval trail for an expense.
+ */
+export function buildExpenseApprovalTrail(expense: any): ExpenseApprovalTrail {
+  const createdUser: ApprovalTrailUser | null = expense.createdBy
+    ? {
+        id: expense.createdBy.id,
+        name: expense.createdBy.name,
+        email: expense.createdBy.email ?? null,
+      }
+    : null;
+
+  const approvedUser: ApprovalTrailUser | null = expense.approvedBy
+    ? {
+        id: expense.approvedBy.id,
+        name: expense.approvedBy.name,
+        email: expense.approvedBy.email ?? null,
+      }
+    : null;
+
+  const postedUser: ApprovalTrailUser | null = expense.postedBy
+    ? {
+        id: expense.postedBy.id,
+        name: expense.postedBy.name,
+        email: expense.postedBy.email ?? null,
+      }
+    : null;
+
+  const voidedUser: ApprovalTrailUser | null = expense.voidedBy
+    ? {
+        id: expense.voidedBy.id,
+        name: expense.voidedBy.name,
+        email: expense.voidedBy.email ?? null,
+      }
+    : null;
+
+  const requiresAdminApproval =
+    expense.status === ExpenseStatus.PENDING_APPROVAL ||
+    Boolean(expense.approvedAt || expense.approvedById);
+
+  const timeline: ApprovalTrailStep[] = [];
+
+  // 1. Initial creation
+  timeline.push({
+    step: "RECORDED",
+    label: "Expense recorded",
+    performedBy: createdUser,
+    performedAt: expense.createdAt,
+    details: {
+      initialStatus: expense.status,
+      voucherNo: expense.voucherNo ?? null,
+    },
+  });
+
+  // 2. Routing to Admin approval if over limit or pending approval
+  if (requiresAdminApproval) {
+    timeline.push({
+      step: "SUBMITTED_FOR_APPROVAL",
+      label: "Submitted for Admin approval (exceeds approval limit)",
+      performedBy: createdUser,
+      performedAt: expense.createdAt,
+    });
+  }
+
+  // 3. Admin approval stamp
+  if (expense.approvedAt || expense.approvedById) {
+    timeline.push({
+      step: "APPROVED",
+      label: "Approved by Admin",
+      performedBy: approvedUser,
+      performedAt: expense.approvedAt ?? expense.updatedAt,
+    });
+  }
+
+  // 4. Ledger posting
+  if (expense.postedAt || expense.postedById || expense.status === ExpenseStatus.POSTED) {
+    timeline.push({
+      step: "POSTED",
+      label: expense.voucherNo
+        ? `Posted to ledger with voucher ${expense.voucherNo}`
+        : "Posted to ledger",
+      performedBy: postedUser,
+      performedAt: expense.postedAt ?? expense.createdAt,
+      details: {
+        voucherNo: expense.voucherNo ?? null,
+      },
+    });
+  }
+
+  // 5. Voided reversal
+  if (expense.status === ExpenseStatus.VOIDED || expense.voidedAt) {
+    timeline.push({
+      step: "VOIDED",
+      label: expense.voidReason ? `Voided: ${expense.voidReason}` : "Voided",
+      performedBy: voidedUser,
+      performedAt: expense.voidedAt ?? expense.updatedAt,
+      details: {
+        voidReason: expense.voidReason ?? null,
+        reversalVoucherNo: expense.reversalEntry?.voucherNo ?? null,
+      },
+    });
+  }
+
+  const voidInfo =
+    expense.status === ExpenseStatus.VOIDED || expense.voidedAt
+      ? {
+          voidedBy: voidedUser,
+          voidedAt: expense.voidedAt ?? expense.updatedAt,
+          voidReason: expense.voidReason ?? null,
+          reversalVoucherNo: expense.reversalEntry?.voucherNo ?? null,
+        }
+      : null;
+
+  return {
+    status: expense.status,
+    requiresAdminApproval,
+    createdBy: createdUser,
+    createdAt: expense.createdAt,
+    approvedBy: approvedUser,
+    approvedAt: expense.approvedAt ?? null,
+    postedBy: postedUser,
+    postedAt: expense.postedAt ?? null,
+    voidInfo,
+    timeline,
+  };
+}
+
+/**
  * Maps a Prisma Expense record to public API representation.
  */
 function mapExpenseResponse(expense: any): ExpenseResponseItem {
+  const approvalTrail = buildExpenseApprovalTrail(expense);
+
   return {
     id: expense.id,
     mosqueId: expense.mosqueId,
@@ -295,12 +497,15 @@ function mapExpenseResponse(expense: any): ExpenseResponseItem {
     status: expense.status,
     notes: expense.notes,
     attachments: expense.attachments ?? [],
+    approvalTrail,
     approvedById: expense.approvedById,
     approvedAt: expense.approvedAt,
     voidReason: expense.voidReason,
     voidedById: expense.voidedById,
     voidedAt: expense.voidedAt,
     reversalOfId: expense.reversalOfId,
+    reversalOfVoucherNo: expense.reversalOf?.voucherNo ?? null,
+    reversalEntryVoucherNo: expense.reversalEntry?.voucherNo ?? null,
     createdById: expense.createdById,
     postedById: expense.postedById,
     postedAt: expense.postedAt,
@@ -333,18 +538,44 @@ function mapExpenseResponse(expense: any): ExpenseResponseItem {
       ? {
           id: expense.createdBy.id,
           name: expense.createdBy.name,
+          email: expense.createdBy.email ?? null,
         }
       : null,
     postedBy: expense.postedBy
       ? {
           id: expense.postedBy.id,
           name: expense.postedBy.name,
+          email: expense.postedBy.email ?? null,
         }
       : null,
     approvedBy: expense.approvedBy
       ? {
           id: expense.approvedBy.id,
           name: expense.approvedBy.name,
+          email: expense.approvedBy.email ?? null,
+        }
+      : null,
+    voidedBy: expense.voidedBy
+      ? {
+          id: expense.voidedBy.id,
+          name: expense.voidedBy.name,
+          email: expense.voidedBy.email ?? null,
+        }
+      : null,
+    reversalOf: expense.reversalOf
+      ? {
+          id: expense.reversalOf.id,
+          voucherNo: expense.reversalOf.voucherNo,
+          amount: expense.reversalOf.amount?.toString() ?? null,
+          date: expense.reversalOf.date,
+        }
+      : null,
+    reversalEntry: expense.reversalEntry
+      ? {
+          id: expense.reversalEntry.id,
+          voucherNo: expense.reversalEntry.voucherNo,
+          amount: expense.reversalEntry.amount?.toString() ?? null,
+          date: expense.reversalEntry.date,
         }
       : null,
   };
@@ -492,4 +723,175 @@ export async function createExpense(
     throw error;
   }
 }
+
+/**
+ * Retrieves a paginated list of expenses for a mosque.
+ *
+ * Authorization:
+ *  - MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER (Oversight roles).
+ *  - Other roles blocked with 403 Forbidden.
+ *
+ * Supported filters:
+ *  - payee: substring search on payee
+ *  - voucherNo: exact/substring search on voucher
+ *  - fund / fundId: target fund CUID
+ *  - account / accountId: target account CUID
+ *  - category / categoryId: target category CUID
+ *  - status: ExpenseStatus (PENDING, PENDING_APPROVAL, POSTED, REJECTED, VOIDED)
+ *  - startDate / endDate: date boundaries
+ *  - search: full-text across voucherNo, payee, notes
+ *  - pagination: page, limit
+ */
+export async function getMosqueExpenses(
+  mosqueId: string,
+  query: GetMosqueExpensesQueryInput,
+  actor: ExpenseActor,
+): Promise<PaginatedResult<ExpenseResponseItem>> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  // Oversight role guard
+  const isOversight =
+    actor.role === Role.MOSQUE_ADMIN ||
+    actor.role === Role.TREASURER ||
+    actor.role === Role.COMMITTEE_MEMBER;
+
+  if (!isOversight) {
+    throw HttpError.forbidden(
+      `Access denied. Role '${actor.role}' cannot view mosque expenses.`,
+      "FORBIDDEN_ROLE",
+    );
+  }
+
+  const page = query.page && query.page > 0 ? query.page : 1;
+  const limit = query.limit && query.limit > 0 ? Math.min(query.limit, 100) : 20;
+  const skip = (page - 1) * limit;
+
+  const andConditions: Prisma.ExpenseWhereInput[] = [
+    { mosqueId: resolvedMosqueId },
+  ];
+
+  // Status filter
+  if (query.status) {
+    andConditions.push({ status: query.status });
+  }
+
+  // Fund filter
+  const targetFundId = query.fund ?? query.fundId;
+  if (targetFundId) {
+    andConditions.push({ fundId: targetFundId });
+  }
+
+  // Account filter
+  const targetAccountId = query.account ?? query.accountId;
+  if (targetAccountId) {
+    andConditions.push({ accountId: targetAccountId });
+  }
+
+  // Category filter
+  const targetCategoryId = query.category ?? query.categoryId;
+  if (targetCategoryId) {
+    andConditions.push({ categoryId: targetCategoryId });
+  }
+
+  // Payee filter
+  if (query.payee) {
+    andConditions.push({
+      payee: { contains: query.payee, mode: "insensitive" },
+    });
+  }
+
+  // Voucher filter
+  if (query.voucherNo) {
+    andConditions.push({
+      voucherNo: { contains: query.voucherNo, mode: "insensitive" },
+    });
+  }
+
+  // Date range filter
+  if (query.startDate || query.endDate) {
+    const dateFilter: Prisma.DateTimeFilter = {};
+    if (query.startDate) dateFilter.gte = query.startDate;
+    if (query.endDate) dateFilter.lte = query.endDate;
+    andConditions.push({ date: dateFilter });
+  }
+
+  // Full-text search across voucherNo, payee, notes
+  if (query.search) {
+    andConditions.push({
+      OR: [
+        { voucherNo: { contains: query.search, mode: "insensitive" } },
+        { payee: { contains: query.search, mode: "insensitive" } },
+        { notes: { contains: query.search, mode: "insensitive" } },
+      ],
+    });
+  }
+
+  const where: Prisma.ExpenseWhereInput = { AND: andConditions };
+
+  const [totalCount, expenses] = await prisma.$transaction([
+    prisma.expense.count({ where }),
+    prisma.expense.findMany({
+      where,
+      skip,
+      take: limit,
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      include: EXPENSE_DEFAULT_INCLUDE,
+    }),
+  ]);
+
+  return {
+    items: expenses.map(mapExpenseResponse),
+    pagination: {
+      totalCount,
+      page,
+      limit,
+      totalPages: Math.ceil(totalCount / limit),
+      hasNextPage: page * limit < totalCount,
+      hasPrevPage: page > 1,
+    },
+  };
+}
+
+/**
+ * Retrieves a single expense record by ID with full details, bill attachments, and approval trail.
+ *
+ * Authorization:
+ *  - MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER (Oversight roles).
+ *  - Other roles blocked with 403 Forbidden.
+ */
+export async function getExpenseById(
+  mosqueId: string,
+  expenseId: string,
+  actor: ExpenseActor,
+): Promise<ExpenseResponseItem> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  // Oversight role guard
+  const isOversight =
+    actor.role === Role.MOSQUE_ADMIN ||
+    actor.role === Role.TREASURER ||
+    actor.role === Role.COMMITTEE_MEMBER;
+
+  if (!isOversight) {
+    throw HttpError.forbidden(
+      `Access denied. Role '${actor.role}' cannot view mosque expenses.`,
+      "FORBIDDEN_ROLE",
+    );
+  }
+
+  const expense = await prisma.expense.findFirst({
+    where: {
+      id: expenseId,
+      mosqueId: resolvedMosqueId,
+    },
+    include: EXPENSE_DEFAULT_INCLUDE,
+  });
+
+  if (!expense) {
+    throw HttpError.notFound("Expense record not found in this mosque.", "EXPENSE_NOT_FOUND");
+  }
+
+  return mapExpenseResponse(expense);
+}
+
 

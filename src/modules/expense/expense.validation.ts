@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { HttpError, type ValidationIssue } from "../../errors/HttpError.js";
+import { ExpenseStatus } from "../../../generated/prisma/client.js";
 
 export interface CreateExpenseInput {
   amount: bigint;
@@ -249,4 +250,169 @@ export function validateExpenseIdParam(param: unknown): string {
   }
   return param.trim();
 }
+
+export interface GetMosqueExpensesQueryInput {
+  payee?: string;
+  voucherNo?: string;
+  fund?: string;
+  fundId?: string;
+  account?: string;
+  accountId?: string;
+  category?: string;
+  categoryId?: string;
+  status?: ExpenseStatus;
+  startDate?: Date;
+  endDate?: Date;
+  search?: string;
+  page?: number;
+  limit?: number;
+  // Gracefully accepted filters shared with donations
+  donor?: string;
+  memberId?: string;
+  family?: string;
+  familyId?: string;
+  campaign?: string;
+  campaignId?: string;
+  source?: string;
+}
+
+/**
+ * Validates query parameters for GET /api/mosques/:mosqueId/expenses and GET /api/expenses.
+ *
+ * Supported filters:
+ *  - payee: text substring search on payee
+ *  - voucherNo (or voucher): exact or substring match on voucher number
+ *  - fund (or fundId): target fund CUID
+ *  - account (or accountId): target account CUID
+ *  - category (or categoryId): target category CUID
+ *  - status: ExpenseStatus (PENDING, PENDING_APPROVAL, POSTED, REJECTED, VOIDED)
+ *  - date range: startDate / endDate (aliases: fromDate / toDate, from / to)
+ *  - search: full-text search across voucherNo, payee, notes
+ *  - pagination: page (default 1), limit (default 20, max 100)
+ */
+export function validateGetMosqueExpensesQuery(query: unknown): GetMosqueExpensesQueryInput {
+  if (!query || typeof query !== "object") return {};
+  const raw = query as Record<string, unknown>;
+  const result: GetMosqueExpensesQueryInput = {};
+
+  // -- payee filter
+  if (typeof raw["payee"] === "string" && raw["payee"].trim()) {
+    result.payee = raw["payee"].trim();
+  }
+
+  // -- voucherNo filter
+  const voucherVal = raw["voucherNo"] ?? raw["voucher"];
+  if (typeof voucherVal === "string" && voucherVal.trim()) {
+    result.voucherNo = voucherVal.trim();
+  }
+
+  // -- fund / fundId filter
+  const fundVal = raw["fund"] ?? raw["fundId"];
+  if (typeof fundVal === "string" && fundVal.trim()) {
+    result.fund = fundVal.trim();
+    result.fundId = fundVal.trim();
+  }
+
+  // -- account / accountId filter
+  const accountVal = raw["account"] ?? raw["accountId"];
+  if (typeof accountVal === "string" && accountVal.trim()) {
+    result.account = accountVal.trim();
+    result.accountId = accountVal.trim();
+  }
+
+  // -- category / categoryId filter
+  const categoryVal = raw["category"] ?? raw["categoryId"];
+  if (typeof categoryVal === "string" && categoryVal.trim()) {
+    result.category = categoryVal.trim();
+    result.categoryId = categoryVal.trim();
+  }
+
+  // -- status filter
+  if (raw["status"] !== undefined && raw["status"] !== null && raw["status"] !== "") {
+    if (typeof raw["status"] !== "string") {
+      throw HttpError.badRequest("Status filter must be a string.");
+    }
+    const statusUpper = raw["status"].trim().toUpperCase();
+    if (!Object.values(ExpenseStatus).includes(statusUpper as ExpenseStatus)) {
+      throw HttpError.badRequest(
+        `Invalid expense status '${raw["status"]}'. Allowed: ${Object.values(ExpenseStatus).join(", ")}.`,
+        "INVALID_EXPENSE_STATUS",
+      );
+    }
+    result.status = statusUpper as ExpenseStatus;
+  }
+
+  // -- date range (startDate / endDate / fromDate / toDate / from / to)
+  const rawStart = raw["startDate"] ?? raw["fromDate"] ?? raw["from"];
+  if (rawStart !== undefined && rawStart !== null && rawStart !== "") {
+    const d = new Date(rawStart as string | number);
+    if (isNaN(d.getTime())) {
+      throw HttpError.badRequest("Invalid startDate/from format. Expected valid date.", "INVALID_DATE_FORMAT");
+    }
+    result.startDate = d;
+  }
+
+  const rawEnd = raw["endDate"] ?? raw["toDate"] ?? raw["to"];
+  if (rawEnd !== undefined && rawEnd !== null && rawEnd !== "") {
+    if (typeof rawEnd === "string" && /^\d{4}-\d{2}-\d{2}$/.test(rawEnd.trim())) {
+      const d = new Date(rawEnd.trim());
+      d.setUTCHours(23, 59, 59, 999);
+      result.endDate = d;
+    } else {
+      const d = new Date(rawEnd as string | number);
+      if (isNaN(d.getTime())) {
+        throw HttpError.badRequest("Invalid endDate/to format. Expected valid date.", "INVALID_DATE_FORMAT");
+      }
+      result.endDate = d;
+    }
+  }
+
+  // -- text search
+  if (typeof raw["search"] === "string" && raw["search"].trim()) {
+    result.search = raw["search"].trim();
+  }
+
+  // -- pagination (page, limit)
+  if (raw["page"] !== undefined && raw["page"] !== null && raw["page"] !== "") {
+    const p = Number(raw["page"]);
+    if (!Number.isInteger(p) || p < 1) {
+      throw HttpError.badRequest("page must be a positive integer.", "INVALID_PAGINATION_PAGE");
+    }
+    result.page = p;
+  }
+
+  if (raw["limit"] !== undefined && raw["limit"] !== null && raw["limit"] !== "") {
+    const l = Number(raw["limit"]);
+    if (!Number.isInteger(l) || l < 1) {
+      throw HttpError.badRequest("limit must be a positive integer.", "INVALID_PAGINATION_LIMIT");
+    }
+    result.limit = l;
+  }
+
+  // -- gracefully accepted donation filters
+  if (typeof raw["donor"] === "string" && raw["donor"].trim()) {
+    result.donor = raw["donor"].trim();
+  }
+  if (typeof raw["memberId"] === "string" && raw["memberId"].trim()) {
+    result.memberId = raw["memberId"].trim();
+  }
+  if (typeof raw["family"] === "string" && raw["family"].trim()) {
+    result.family = raw["family"].trim();
+  }
+  if (typeof raw["familyId"] === "string" && raw["familyId"].trim()) {
+    result.familyId = raw["familyId"].trim();
+  }
+  if (typeof raw["campaign"] === "string" && raw["campaign"].trim()) {
+    result.campaign = raw["campaign"].trim();
+  }
+  if (typeof raw["campaignId"] === "string" && raw["campaignId"].trim()) {
+    result.campaignId = raw["campaignId"].trim();
+  }
+  if (typeof raw["source"] === "string" && raw["source"].trim()) {
+    result.source = raw["source"].trim();
+  }
+
+  return result;
+}
+
 
