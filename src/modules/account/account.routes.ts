@@ -17,6 +17,7 @@ import {
   updateAccountHandler,
   archiveAccountHandler,
 } from "./account.controller.js";
+import { reconcileAccountHandler } from "../report/report.controller.js";
 
 const accountRouter: Router = Router({ mergeParams: true });
 
@@ -87,6 +88,20 @@ accountRouter.post(
   authenticate,
   requireMosqueMembership(Role.MOSQUE_ADMIN),
   archiveAccountHandler,
+);
+
+/**
+ * POST /api/mosques/:mosqueId/accounts/:accountId/reconciliations AND POST /api/accounts/:accountId/reconciliations
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER
+ *
+ * Compares system balance with physical/statement realBalance.
+ * Creates an explicit adjustment entry (Donation for surplus, Expense for shortfall).
+ */
+accountRouter.post(
+  "/:accountId/reconciliations",
+  authenticate,
+  requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
+  reconcileAccountHandler,
 );
 
 export default accountRouter;

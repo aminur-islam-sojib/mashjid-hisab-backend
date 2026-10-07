@@ -211,3 +211,46 @@ enum CollectionStatus {
   VERIFIED
   REJECTED
 }
+
+// ---------------------------------------------------------------------------
+// PeriodAction
+// Audit action performed on an accounting period (month lock/unlock).
+// ---------------------------------------------------------------------------
+enum PeriodAction {
+  CLOSED
+  REOPENED
+}
+
+// ---------------------------------------------------------------------------
+// ExportFormat
+// Supported output formats for financial and operational report exports.
+// ---------------------------------------------------------------------------
+enum ExportFormat {
+  CSV
+  XLSX
+  PDF
+}
+
+// ---------------------------------------------------------------------------
+// ExportStatus
+// Lifecycle of an async report export job.
+// ---------------------------------------------------------------------------
+enum ExportStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+// ---------------------------------------------------------------------------
+// ReportType
+// Available report definitions supported by the export engine.
+// ---------------------------------------------------------------------------
+enum ReportType {
+  DASHBOARD
+  BALANCES
+  INCOME_EXPENSE
+  FUND_STATEMENT
+  ACCOUNT_STATEMENT
+  DONORS
+  FISCAL_YEAR
+}

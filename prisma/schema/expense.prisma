@@ -52,6 +52,8 @@ model Expense {
   // Attachments (e.g. bill photo, invoice, payment slip)
   attachments        String[]      @default([])
 
+  reconciliationAdjustment AccountReconciliation? @relation("ReconciliationExpense")
+
   // Approval audit trail (for entries requiring admin sign-off)
   approvedById       String?
   approvedBy         User?         @relation("ExpenseApprover", fields: [approvedById], references: [id], onDelete: SetNull)

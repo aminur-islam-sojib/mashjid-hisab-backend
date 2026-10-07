@@ -1,0 +1,87 @@
+// =============================================================================
+// report.prisma — Domain 10: Reports, Export Jobs, Period Control, Reconciliations
+// =============================================================================
+
+/// Tracks period lock/unlock events performed by mosque administrators.
+model PeriodAuditLog {
+  id            String       @id @default(cuid())
+  mosqueId      String
+  mosque        Mosque       @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  period        String       // Format: "YYYY-MM"
+  action        PeriodAction // CLOSED | REOPENED
+  reason        String?
+
+  performedById String
+  performedBy   User         @relation("PeriodAuditor", fields: [performedById], references: [id], onDelete: Restrict)
+
+  createdAt     DateTime     @default(now())
+
+  @@index([mosqueId])
+  @@index([period])
+  @@map("period_audit_logs")
+}
+
+/// Tracks physical cash/bank balance reconciliations and links to adjustment entries.
+model AccountReconciliation {
+  id                   String    @id @default(cuid())
+  mosqueId             String
+  mosque               Mosque    @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  accountId            String
+  account              Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  asOf                 DateTime  @default(now())
+
+  // Minor units (poisha), never floats
+  systemBalance        BigInt
+  realBalance          BigInt
+  difference           BigInt    // realBalance - systemBalance
+
+  notes                String?
+
+  reconciledById       String
+  reconciledBy         User      @relation("AccountReconciler", fields: [reconciledById], references: [id], onDelete: Restrict)
+
+  // Explicit adjustment ledger entries if discrepancy exists
+  adjustmentDonationId String?   @unique
+  adjustmentDonation   Donation? @relation("ReconciliationDonation", fields: [adjustmentDonationId], references: [id], onDelete: SetNull)
+
+  adjustmentExpenseId  String?   @unique
+  adjustmentExpense    Expense?  @relation("ReconciliationExpense", fields: [adjustmentExpenseId], references: [id], onDelete: SetNull)
+
+  createdAt            DateTime  @default(now())
+
+  @@index([mosqueId])
+  @@index([accountId])
+  @@index([asOf])
+  @@map("account_reconciliations")
+}
+
+/// Asynchronous or pre-generated report exports (CSV, XLSX, PDF).
+model ReportExport {
+  id            String       @id @default(cuid())
+  mosqueId      String
+  mosque        Mosque       @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  reportType    ReportType
+  format        ExportFormat
+  status        ExportStatus @default(PENDING)
+
+  parameters    Json?
+  downloadUrl   String?
+  fileContent   String?      @db.Text
+  mimeType      String?
+  fileName      String?
+
+  requestedById String
+  requestedBy   User         @relation("ReportExporter", fields: [requestedById], references: [id], onDelete: Restrict)
+
+  expiresAt     DateTime
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([mosqueId])
+  @@index([requestedById])
+  @@map("report_exports")
+}

@@ -71,6 +71,9 @@ model User {
   waivedDues              Due[]                 @relation("DueWaiver")
   countedCollections      CollectionSession[]   @relation("CollectionCounter")
   verifiedCollections     CollectionSession[]   @relation("CollectionVerifier")
+  reconciledAccounts      AccountReconciliation[] @relation("AccountReconciler")
+  periodAudits            PeriodAuditLog[]        @relation("PeriodAuditor")
+  requestedExports        ReportExport[]          @relation("ReportExporter")
 
   @@map("users")
 }

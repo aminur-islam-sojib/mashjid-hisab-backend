@@ -623,6 +623,18 @@ export async function createDonation(
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
       const created = await prisma.$transaction(async (tx) => {
+        // 0. Closed accounting period check
+        const mosque = await tx.mosque.findUnique({
+          where: { id: resolvedMosqueId },
+          select: { closedPeriodUntil: true, fiscalYearStart: true },
+        });
+        if (mosque && isDateInClosedPeriod(input.date, mosque)) {
+          throw HttpError.badRequest(
+            "Cannot record donation in a closed accounting period or previous fiscal year.",
+            "PERIOD_CLOSED",
+          );
+        }
+
         // 1. Financial validation
         await validateDonationFinanceEntities(
           tx,

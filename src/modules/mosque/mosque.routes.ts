@@ -21,6 +21,7 @@ import pledgeRouter from "../pledge/pledge.routes.js";
 import { chandaPlanRouter, dueRouter } from "../chanda/chanda.routes.js";
 import collectionRouter from "../collection/collection.routes.js";
 import meRouter from "../me/me.routes.js";
+import { reportRouter, periodRouter } from "../report/report.routes.js";
 import {
   createMosqueHandler,
   getUserMosquesHandler,
@@ -136,6 +137,18 @@ mosqueRouter.use("/:mosqueId/collections", collectionRouter);
  * Delegated to Member Self-Service Router (donations, dues, pledges, annual statements)
  */
 mosqueRouter.use("/:mosqueId/me", meRouter);
+
+/**
+ * /api/mosques/:mosqueId/reports
+ * Delegated to Report Router (dashboard, balances, statements, donors, exports)
+ */
+mosqueRouter.use("/:mosqueId/reports", reportRouter);
+
+/**
+ * /api/mosques/:mosqueId/periods
+ * Delegated to Period Router (accounting period lock & reopen)
+ */
+mosqueRouter.use("/:mosqueId/periods", periodRouter);
 
 /**
  * GET /api/mosques/:mosqueId

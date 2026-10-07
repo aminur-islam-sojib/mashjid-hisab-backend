@@ -55,6 +55,9 @@ model Mosque {
   chandaPlans        ChandaPlan[]
   dues               Due[]
   collectionSessions CollectionSession[]
+  periodAuditLogs        PeriodAuditLog[]
+  accountReconciliations AccountReconciliation[]
+  reportExports          ReportExport[]
 
   @@map("mosques")
 }

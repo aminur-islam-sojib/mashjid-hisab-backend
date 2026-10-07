@@ -19,6 +19,8 @@ import pledgeRouter from "../modules/pledge/pledge.routes.js";
 import { chandaPlanRouter, dueRouter } from "../modules/chanda/chanda.routes.js";
 import collectionRouter from "../modules/collection/collection.routes.js";
 import meRouter from "../modules/me/me.routes.js";
+import accountRouter from "../modules/account/account.routes.js";
+import { reportRouter, periodRouter } from "../modules/report/report.routes.js";
 import { publicInviteLinkRouter } from "../modules/invite-link/invite-link.routes.js";
 
 const apiRouter: Router = Router();
@@ -27,6 +29,7 @@ apiRouter.use("/auth", authRouter);
 apiRouter.use("/users", userRouter);
 apiRouter.use("/mosques", mosqueRouter);
 apiRouter.use("/memberships", membershipRouter);
+apiRouter.use("/accounts", accountRouter);
 apiRouter.use("/donations", donationRouter);
 apiRouter.use("/expenses", expenseRouter);
 apiRouter.use("/transfers", transferRouter);
@@ -37,6 +40,8 @@ apiRouter.use("/chanda-plans", chandaPlanRouter);
 apiRouter.use("/dues", dueRouter);
 apiRouter.use("/collections", collectionRouter);
 apiRouter.use("/me", meRouter);
+apiRouter.use("/reports", reportRouter);
+apiRouter.use("/periods", periodRouter);
 
 // Public routes (transparency, public mosque profile, donation summaries, invite links)
 const publicRouter: Router = Router();

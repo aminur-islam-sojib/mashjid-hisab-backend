@@ -67,6 +67,7 @@ model Account {
   expenses       Expense[]
   transfers          Transfer[]
   collectionSessions CollectionSession[]
+  reconciliations    AccountReconciliation[]
 
   @@unique([mosqueId, name])
   @@index([mosqueId])

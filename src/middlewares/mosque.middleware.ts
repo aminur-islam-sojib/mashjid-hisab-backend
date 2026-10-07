@@ -153,6 +153,12 @@ export function requireMosqueMembership(
         typeof req.params["donationId"] === "string" ? req.params["donationId"] : undefined;
       const paramExpenseId =
         typeof req.params["expenseId"] === "string" ? req.params["expenseId"] : undefined;
+      const paramAccountId =
+        typeof req.params["accountId"] === "string" ? req.params["accountId"] : undefined;
+      const paramFundId =
+        typeof req.params["fundId"] === "string" ? req.params["fundId"] : undefined;
+      const paramExportId =
+        typeof req.params["exportId"] === "string" ? req.params["exportId"] : undefined;
       const paramId =
         typeof req.params["id"] === "string" ? req.params["id"] : undefined;
 
@@ -175,6 +181,36 @@ export function requireMosqueMembership(
         });
         if (expenseRecord) {
           mosqueId = expenseRecord.mosqueId;
+        }
+      }
+
+      if (!mosqueId && paramAccountId) {
+        const accountRecord = await prisma.account.findUnique({
+          where: { id: paramAccountId },
+          select: { mosqueId: true },
+        });
+        if (accountRecord) {
+          mosqueId = accountRecord.mosqueId;
+        }
+      }
+
+      if (!mosqueId && paramFundId) {
+        const fundRecord = await prisma.fund.findUnique({
+          where: { id: paramFundId },
+          select: { mosqueId: true },
+        });
+        if (fundRecord) {
+          mosqueId = fundRecord.mosqueId;
+        }
+      }
+
+      if (!mosqueId && paramExportId) {
+        const exportRecord = await prisma.reportExport.findUnique({
+          where: { id: paramExportId },
+          select: { mosqueId: true },
+        });
+        if (exportRecord) {
+          mosqueId = exportRecord.mosqueId;
         }
       }
 

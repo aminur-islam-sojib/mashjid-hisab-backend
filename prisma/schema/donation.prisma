@@ -56,6 +56,7 @@ model Donation {
   pledgeId           String?
   pledge             Pledge?            @relation(fields: [pledgeId], references: [id], onDelete: SetNull)
   collectionSession  CollectionSession? @relation("CollectionSessionDonation")
+  reconciliationAdjustment AccountReconciliation? @relation("ReconciliationDonation")
 
   // Collection source channel
   source             DonationSource @default(MEMBER)
