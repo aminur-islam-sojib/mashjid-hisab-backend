@@ -4,10 +4,13 @@
 // Design notes:
 //  • Public-facing transparency services that enforce complete data minimisation.
 //  • Existence-hiding posture: Disabled transparency returns generic 404 (not 403).
-//  • Campaign endpoints compute raised amounts live from POSTED donations.
-//  • Anonymous-flagged donors are strictly omitted from donor listings.
-//  • Transparency reports provide totals only; individual transaction records
-//    are never exposed.
+//  • Summary computes currentBalance strictly via getFundBalance() to prevent drift.
+//  • Period sums (totalCollected, totalDisbursed) cover current fiscal year only.
+//  • Feed excludes voided originals and reversal corrections (reversalOfId: null).
+//  • Anonymous-flagged donors are strictly redacted as "Anonymous".
+//  • Never exposes Account rows, account numbers, or donor phone/email.
+//  • Expense summary aggregates by Category only (never itemized vendor/staff rows).
+//  • Campaign endpoints compute raised and pledged amounts live from the ledger.
 //  • Receipt verification confirms authenticity without leaking donor identities.
 // =============================================================================
 
@@ -17,19 +20,88 @@ import {
   CampaignStatus,
   DonationStatus,
   ExpenseStatus,
+  FundType,
+  PledgeStatus,
+  type Prisma,
 } from "../../../generated/prisma/client.js";
-import { validateTransparencyMonthQuery } from "./transparency.validation.js";
+import { getFundBalance } from "../fund/fund.service.js";
+import {
+  validateTransparencyMonthQuery,
+  getFiscalYearDateRange,
+  type DonationsFeedQuery,
+} from "./transparency.validation.js";
 
 // ---------------------------------------------------------------------------
 // Response Types
 // ---------------------------------------------------------------------------
 
-export interface PublicCampaignSummary {
+export interface PublicFundSummaryItem {
+  name: string;
+  type: FundType;
+  isRestricted: boolean;
+  totalCollected: string;
+  totalDisbursed: string;
+  currentBalance: string;
+}
+
+export interface PublicMosqueSummary {
+  mosque: {
+    name: string;
+    slug: string;
+  };
+  fiscalYear: {
+    startDate: Date;
+    endDate: Date;
+  };
+  funds: PublicFundSummaryItem[];
+}
+
+export interface PublicDonationFeedItem {
+  amount: string;
+  fundName: string;
+  categoryName: string;
+  date: Date;
+  donorName: string;
+}
+
+export interface PublicDonationsFeedResult {
+  donations: PublicDonationFeedItem[];
+  pagination: {
+    page: number;
+    limit: number;
+    totalCount: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPrevPage: boolean;
+  };
+}
+
+export interface PublicExpenseCategoryItem {
+  categoryName: string;
+  total: string;
+}
+
+export interface PublicExpenseCategorySummary {
+  mosque: {
+    name: string;
+    slug: string;
+  };
+  fiscalYear: {
+    startDate: Date;
+    endDate: Date;
+  };
+  totalExpenses: string;
+  categories: PublicExpenseCategoryItem[];
+}
+
+export interface PublicCampaignFeedItem {
   id: string;
   title: string;
   description: string | null;
+  goalAmount: string | null;
   targetAmount: string | null;
   raisedAmount: string;
+  pledgedAmount: string;
   percentage: number | null;
   status: CampaignStatus;
   startDate: Date;
@@ -46,6 +118,7 @@ export interface PublicCampaignDetail {
   id: string;
   title: string;
   description: string | null;
+  goalAmount: string | null;
   targetAmount: string | null;
   raisedAmount: string;
   percentage: number | null;
@@ -107,33 +180,340 @@ export interface PublicReceiptVerification {
 }
 
 // ---------------------------------------------------------------------------
+// Internal Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolves an active mosque by its URL slug and verifies public transparency is enabled.
+ *
+ * Security & Anti-Enumeration:
+ * Returns generic 404 (not 403) if the mosque does not exist, is archived, or
+ * has isTransparencyPageEnabled set to false. Turning transparency off is
+ * completely indistinguishable from the mosque not existing.
+ */
+async function resolveTransparencyMosque(slug: string) {
+  const mosque = await prisma.mosque.findUnique({
+    where: { slug },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      fiscalYearStart: true,
+      isTransparencyPageEnabled: true,
+      publicTransparency: true,
+      isArchived: true,
+    },
+  });
+
+  const isEnabled = Boolean(
+    mosque && (mosque.isTransparencyPageEnabled || mosque.publicTransparency),
+  );
+
+  if (!mosque || mosque.isArchived || !isEnabled) {
+    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
+  }
+
+  return mosque;
+}
+
+// ---------------------------------------------------------------------------
 // Service Functions
 // ---------------------------------------------------------------------------
 
 /**
- * Lists public fundraising campaigns for a mosque by slug.
+ * Returns the mosque's fiscal-year-to-date totals per Fund:
+ * name, type, isRestricted, totalCollected, totalDisbursed, currentBalance.
  *
- * Privacy guarantees:
- *  - Strips all internal IDs (no internal member, user, fund, or account IDs).
- *  - Excludes all donor identities.
- *  - Raised amount is aggregated live from POSTED donations.
+ * Design & Security rules:
+ *  - Compute currentBalance strictly via the internal getFundBalance(fund.id)
+ *    so numbers never drift from the admin dashboard.
+ *  - totalCollected & totalDisbursed are period sums (POSTED only, this fiscal year).
+ *  - Gated by isTransparencyPageEnabled (404 generic not found if false).
+ *  - Never exposes Account rows, account numbers, or bank details.
  *
  * @param slug - Mosque URL slug
  */
-export async function getPublicCampaigns(slug: string): Promise<PublicCampaignSummary[]> {
-  const mosque = await prisma.mosque.findUnique({
-    where: { slug },
-    select: { id: true, isArchived: true },
+export async function getPublicMosqueSummary(
+  slug: string,
+): Promise<PublicMosqueSummary> {
+  const mosque = await resolveTransparencyMosque(slug);
+  const { startDate, endDate } = getFiscalYearDateRange(mosque.fiscalYearStart);
+
+  // 1. Fetch active funds
+  const funds = await prisma.fund.findMany({
+    where: {
+      mosqueId: mosque.id,
+      isArchived: false,
+    },
+    select: {
+      id: true,
+      name: true,
+      type: true,
+      isRestricted: true,
+    },
+    orderBy: { name: "asc" },
   });
 
-  if (!mosque || mosque.isArchived) {
-    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
+  if (funds.length === 0) {
+    return {
+      mosque: { name: mosque.name, slug: mosque.slug },
+      fiscalYear: { startDate, endDate },
+      funds: [],
+    };
   }
+
+  const fundIds = funds.map((f) => f.id);
+
+  // 2. Fetch period sums (POSTED only, this fiscal year) in parallel with fund balances
+  const [donationsByFund, expensesByFund, balances] = await Promise.all([
+    prisma.donation.groupBy({
+      by: ["fundId"],
+      where: {
+        mosqueId: mosque.id,
+        fundId: { in: fundIds },
+        status: DonationStatus.POSTED,
+        date: { gte: startDate, lt: endDate },
+      },
+      _sum: { amount: true },
+    }),
+    prisma.expense.groupBy({
+      by: ["fundId"],
+      where: {
+        mosqueId: mosque.id,
+        fundId: { in: fundIds },
+        status: ExpenseStatus.POSTED,
+        date: { gte: startDate, lt: endDate },
+      },
+      _sum: { amount: true },
+    }),
+    // Strictly reusing getFundBalance() to prevent drift between admin and public dashboard numbers
+    Promise.all(funds.map((f) => getFundBalance(f.id))),
+  ]);
+
+  const donationMap = new Map<string, bigint>();
+  for (const d of donationsByFund) {
+    donationMap.set(d.fundId, d._sum.amount ?? 0n);
+  }
+
+  const expenseMap = new Map<string, bigint>();
+  for (const e of expensesByFund) {
+    expenseMap.set(e.fundId, e._sum.amount ?? 0n);
+  }
+
+  const fundSummaries: PublicFundSummaryItem[] = funds.map((f, i) => ({
+    name: f.name,
+    type: f.type,
+    isRestricted: f.isRestricted,
+    totalCollected: (donationMap.get(f.id) ?? 0n).toString(),
+    totalDisbursed: (expenseMap.get(f.id) ?? 0n).toString(),
+    currentBalance: (balances[i] ?? 0n).toString(),
+  }));
+
+  return {
+    mosque: {
+      name: mosque.name,
+      slug: mosque.slug,
+    },
+    fiscalYear: {
+      startDate,
+      endDate,
+    },
+    funds: fundSummaries,
+  };
+}
+
+/**
+ * Paginated, newest-first feed of individual donations.
+ *
+ * Privacy & Accounting rules:
+ *  - Filter: status: POSTED and reversalOfId: null. This condition cleanly excludes
+ *    both voided originals and reversal corrections from the visible feed.
+ *  - Fields returned: amount, fundName, categoryName, date, donorName.
+ *  - Substitutes "Anonymous" when isAnonymousPublic is true or donorName is null.
+ *  - Never includes donorPhone, donorEmail, memberId, accountId, or internal IDs.
+ *
+ * @param slug - Mosque URL slug
+ * @param query - Validated pagination parameters (page, limit)
+ */
+export async function getPublicMosqueDonationsFeed(
+  slug: string,
+  query: DonationsFeedQuery,
+): Promise<PublicDonationsFeedResult> {
+  const mosque = await resolveTransparencyMosque(slug);
+  const { page, limit } = query;
+  const skip = (page - 1) * limit;
+
+  // Filter: status: POSTED and reversalOfId: null (excludes voided originals and reversal corrections)
+  const where: Prisma.DonationWhereInput = {
+    mosqueId: mosque.id,
+    status: DonationStatus.POSTED,
+    reversalOfId: null,
+  };
+
+  const [totalCount, rows] = await Promise.all([
+    prisma.donation.count({ where }),
+    prisma.donation.findMany({
+      where,
+      select: {
+        amount: true,
+        date: true,
+        donorName: true,
+        isAnonymousPublic: true,
+        fund: {
+          select: { name: true },
+        },
+        category: {
+          select: { name: true },
+        },
+        member: {
+          select: {
+            user: {
+              select: { name: true },
+            },
+          },
+        },
+        family: {
+          select: { name: true },
+        },
+      },
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+      skip,
+      take: limit,
+    }),
+  ]);
+
+  const donations: PublicDonationFeedItem[] = rows.map((d) => {
+    let displayName = "Anonymous";
+    if (!d.isAnonymousPublic) {
+      if (d.donorName && d.donorName.trim() && d.donorName.trim().toLowerCase() !== "anonymous") {
+        displayName = d.donorName.trim();
+      } else if (d.member?.user?.name && d.member.user.name.trim()) {
+        displayName = d.member.user.name.trim();
+      } else if (d.family?.name && d.family.name.trim()) {
+        displayName = `${d.family.name.trim()} Household`;
+      }
+    }
+
+    return {
+      amount: d.amount.toString(),
+      fundName: d.fund.name,
+      categoryName: d.category.name,
+      date: d.date,
+      donorName: displayName,
+    };
+  });
+
+  const totalPages = Math.ceil(totalCount / limit) || 1;
+
+  return {
+    donations,
+    pagination: {
+      page,
+      limit,
+      totalCount,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    },
+  };
+}
+
+/**
+ * Expense totals grouped by Category (not itemized) for the current fiscal year.
+ *
+ * Privacy rules:
+ *  - Deliberately aggregates by Category only: an itemized public feed would expose
+ *    vendor payments and staff salary details next to names.
+ *  - This is the "where does the money go" macro view, not an internal audit log.
+ *
+ * @param slug - Mosque URL slug
+ */
+export async function getPublicMosqueExpenseCategorySummary(
+  slug: string,
+): Promise<PublicExpenseCategorySummary> {
+  const mosque = await resolveTransparencyMosque(slug);
+  const { startDate, endDate } = getFiscalYearDateRange(mosque.fiscalYearStart);
+
+  const expenseGroups = await prisma.expense.groupBy({
+    by: ["categoryId"],
+    where: {
+      mosqueId: mosque.id,
+      status: ExpenseStatus.POSTED,
+      date: { gte: startDate, lt: endDate },
+    },
+    _sum: { amount: true },
+    orderBy: {
+      _sum: {
+        amount: "desc",
+      },
+    },
+  });
+
+  const categoryIds = expenseGroups.map((g) => g.categoryId);
+  const categories = await prisma.category.findMany({
+    where: { id: { in: categoryIds } },
+    select: { id: true, name: true },
+  });
+  const categoryMap = new Map(categories.map((c) => [c.id, c.name]));
+
+  let totalExpenseAmount = 0n;
+  const categoryItems: PublicExpenseCategoryItem[] = [];
+
+  for (const group of expenseGroups) {
+    const amount = group._sum.amount ?? 0n;
+    totalExpenseAmount += amount;
+    categoryItems.push({
+      categoryName: categoryMap.get(group.categoryId) ?? "General Expense",
+      total: amount.toString(),
+    });
+  }
+
+  return {
+    mosque: {
+      name: mosque.name,
+      slug: mosque.slug,
+    },
+    fiscalYear: {
+      startDate,
+      endDate,
+    },
+    totalExpenses: totalExpenseAmount.toString(),
+    categories: categoryItems,
+  };
+}
+
+/**
+ * Lists ACTIVE campaigns (plus recently completed ones within 30 days) with
+ * title, description, goalAmount, raisedAmount, pledgedAmount, and endDate.
+ *
+ * Privacy guarantees:
+ *  - No individual pledger or donor identities exposed.
+ *  - Raised amount is aggregated live from POSTED donations.
+ *  - Pledged amount is aggregated live from open (OPEN / PARTIAL) pledges.
+ *
+ * @param slug - Mosque URL slug
+ */
+export async function getPublicCampaigns(
+  slug: string,
+): Promise<PublicCampaignFeedItem[]> {
+  const mosque = await resolveTransparencyMosque(slug);
+
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
   const campaigns = await prisma.campaign.findMany({
     where: {
       mosqueId: mosque.id,
       isPublic: true,
+      OR: [
+        { status: CampaignStatus.ACTIVE },
+        {
+          status: CampaignStatus.CLOSED,
+          OR: [
+            { closedAt: { gte: thirtyDaysAgo } },
+            { endDate: { gte: thirtyDaysAgo } },
+          ],
+        },
+      ],
     },
     select: {
       id: true,
@@ -153,37 +533,59 @@ export async function getPublicCampaigns(slug: string): Promise<PublicCampaignSu
 
   const campaignIds = campaigns.map((c) => c.id);
 
-  // Efficient batch aggregation across all public campaigns
-  const aggregations = await prisma.donation.groupBy({
-    by: ["campaignId"],
-    where: {
-      campaignId: { in: campaignIds },
-      status: DonationStatus.POSTED,
-    },
-    _sum: { amount: true },
-  });
+  // Aggregate raisedAmount (POSTED donations) and pledgedAmount (OPEN / PARTIAL pledges)
+  const [raisedAggregations, pledgeAggregations] = await Promise.all([
+    prisma.donation.groupBy({
+      by: ["campaignId"],
+      where: {
+        campaignId: { in: campaignIds },
+        status: DonationStatus.POSTED,
+      },
+      _sum: { amount: true },
+    }),
+    prisma.pledge.groupBy({
+      by: ["campaignId"],
+      where: {
+        campaignId: { in: campaignIds },
+        status: { in: [PledgeStatus.OPEN, PledgeStatus.PARTIAL] },
+      },
+      _sum: { amount: true },
+    }),
+  ]);
 
   const raisedMap = new Map<string, bigint>();
-  for (const agg of aggregations) {
+  for (const agg of raisedAggregations) {
     if (agg.campaignId) {
       raisedMap.set(agg.campaignId, agg._sum.amount ?? 0n);
     }
   }
 
+  const pledgeMap = new Map<string, bigint>();
+  for (const agg of pledgeAggregations) {
+    if (agg.campaignId) {
+      pledgeMap.set(agg.campaignId, agg._sum.amount ?? 0n);
+    }
+  }
+
   return campaigns.map((c) => {
     const raised = raisedMap.get(c.id) ?? 0n;
+    const pledged = pledgeMap.get(c.id) ?? 0n;
     let percentage: number | null = null;
     if (c.targetAmount && c.targetAmount > 0n) {
       const pct = Number((raised * 10000n) / c.targetAmount) / 100;
       percentage = Math.min(100, Math.round(pct * 100) / 100);
     }
 
+    const goal = c.targetAmount ? c.targetAmount.toString() : null;
+
     return {
       id: c.id,
       title: c.title,
       description: c.description ?? null,
-      targetAmount: c.targetAmount ? c.targetAmount.toString() : null,
+      goalAmount: goal,
+      targetAmount: goal,
       raisedAmount: raised.toString(),
+      pledgedAmount: pledged.toString(),
       percentage,
       status: c.status,
       startDate: c.startDate,
@@ -207,14 +609,7 @@ export async function getPublicCampaignDetails(
   slug: string,
   campaignId: string,
 ): Promise<PublicCampaignDetail> {
-  const mosque = await prisma.mosque.findUnique({
-    where: { slug },
-    select: { id: true, isArchived: true },
-  });
-
-  if (!mosque || mosque.isArchived) {
-    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
-  }
+  const mosque = await resolveTransparencyMosque(slug);
 
   const campaign = await prisma.campaign.findFirst({
     where: {
@@ -301,11 +696,14 @@ export async function getPublicCampaignDetails(
       };
     });
 
+  const goal = campaign.targetAmount ? campaign.targetAmount.toString() : null;
+
   return {
     id: campaign.id,
     title: campaign.title,
     description: campaign.description ?? null,
-    targetAmount: campaign.targetAmount ? campaign.targetAmount.toString() : null,
+    goalAmount: goal,
+    targetAmount: goal,
     raisedAmount: raised.toString(),
     percentage,
     donorCount: donorCountDistinct.length,
@@ -320,7 +718,7 @@ export async function getPublicCampaignDetails(
  * Retrieves monthly totals of income and expense broken down by fund and category.
  *
  * Privacy & Security guarantees:
- *  - Only accessible if mosque has enabled `publicTransparency`.
+ *  - Only accessible if mosque has enabled public transparency.
  *  - Returns generic 404 (not 403) if disabled or not found to avoid tenant enumeration.
  *  - Totals only; never exposes individual transactions, account numbers, or personal details.
  *
@@ -331,21 +729,7 @@ export async function getPublicMosqueTransparency(
   slug: string,
   monthQuery?: string,
 ): Promise<PublicTransparencyReport> {
-  const mosque = await prisma.mosque.findUnique({
-    where: { slug },
-    select: {
-      id: true,
-      name: true,
-      slug: true,
-      publicTransparency: true,
-      isArchived: true,
-    },
-  });
-
-  // Existence-hiding security posture: generic 404 if not found, archived, or transparency disabled
-  if (!mosque || mosque.isArchived || !mosque.publicTransparency) {
-    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
-  }
+  const mosque = await resolveTransparencyMosque(slug);
 
   const { monthStr, startDate, endDate } = validateTransparencyMonthQuery(monthQuery);
 
@@ -545,4 +929,3 @@ export async function verifyDonationReceipt(
     },
   };
 }
-

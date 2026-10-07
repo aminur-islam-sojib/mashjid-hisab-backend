@@ -113,3 +113,69 @@ export function validateReceiptVerificationCodeParam(code: unknown): string {
 
   return trimmed;
 }
+
+export interface DonationsFeedQuery {
+  page: number;
+  limit: number;
+}
+
+/**
+ * Validates query parameters for the public donations feed.
+ */
+export function validateDonationsFeedQuery(query: unknown): DonationsFeedQuery {
+  if (!query || typeof query !== "object") {
+    return { page: 1, limit: 20 };
+  }
+
+  const raw = query as Record<string, unknown>;
+  let page = 1;
+  let limit = 20;
+
+  if (raw["page"] !== undefined && raw["page"] !== "") {
+    const p = parseInt(String(raw["page"]), 10);
+    if (isNaN(p) || p < 1) {
+      throw HttpError.badRequest(
+        "Page must be a positive integer greater than or equal to 1.",
+        "INVALID_PAGE",
+      );
+    }
+    page = p;
+  }
+
+  if (raw["limit"] !== undefined && raw["limit"] !== "") {
+    const l = parseInt(String(raw["limit"]), 10);
+    if (isNaN(l) || l < 1 || l > 100) {
+      throw HttpError.badRequest(
+        "Limit must be an integer between 1 and 100.",
+        "INVALID_LIMIT",
+      );
+    }
+    limit = l;
+  }
+
+  return { page, limit };
+}
+
+/**
+ * Calculates UTC date range for a given mosque fiscal year start month.
+ *
+ * E.g., if fiscalYearStartMonth is 7 (July) and referenceDate is Oct 2026:
+ * FY starts July 1, 2026 00:00:00 UTC and ends July 1, 2027 00:00:00 UTC.
+ */
+export function getFiscalYearDateRange(
+  fiscalYearStartMonth: number = 7,
+  referenceDate: Date = new Date(),
+): { startDate: Date; endDate: Date } {
+  const currentYear = referenceDate.getUTCFullYear();
+  const currentMonth = referenceDate.getUTCMonth() + 1; // 1-12
+
+  let fyStartYear = currentYear;
+  if (currentMonth < fiscalYearStartMonth) {
+    fyStartYear = currentYear - 1;
+  }
+
+  const startDate = new Date(Date.UTC(fyStartYear, fiscalYearStartMonth - 1, 1, 0, 0, 0, 0));
+  const endDate = new Date(Date.UTC(fyStartYear + 1, fiscalYearStartMonth - 1, 1, 0, 0, 0, 0));
+
+  return { startDate, endDate };
+}

@@ -50,6 +50,7 @@ export async function createTestTenantFixture(): Promise<TestTenantFixture> {
       address: "Test Mosque Location",
       timezone: "Asia/Dhaka",
       fiscalYearStart: 7,
+      isTransparencyPageEnabled: true,
       publicTransparency: true,
     },
   });

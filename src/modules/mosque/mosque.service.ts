@@ -61,6 +61,7 @@ export interface MosqueSettings {
   address: string | null;
   timezone: string;
   fiscalYearStart: number;
+  isTransparencyPageEnabled: boolean;
   publicTransparency: boolean;
   isArchived: boolean;
   archivedAt: Date | null;
@@ -835,6 +836,7 @@ export async function getMosqueSettings(
           address: true,
           timezone: true,
           fiscalYearStart: true,
+          isTransparencyPageEnabled: true,
           publicTransparency: true,
           isArchived: true,
           archivedAt: true,
@@ -859,6 +861,7 @@ export async function getMosqueSettings(
     address: membership.mosque.address,
     timezone: membership.mosque.timezone,
     fiscalYearStart: membership.mosque.fiscalYearStart,
+    isTransparencyPageEnabled: membership.mosque.isTransparencyPageEnabled,
     publicTransparency: membership.mosque.publicTransparency,
     isArchived: membership.mosque.isArchived,
     archivedAt: membership.mosque.archivedAt,
@@ -933,7 +936,12 @@ export async function updateMosque(
       ...(input.fiscalYearStart !== undefined && {
         fiscalYearStart: input.fiscalYearStart,
       }),
-      ...(input.publicTransparency !== undefined && {
+      ...(input.isTransparencyPageEnabled !== undefined && {
+        isTransparencyPageEnabled: input.isTransparencyPageEnabled,
+        publicTransparency: input.isTransparencyPageEnabled,
+      }),
+      ...(input.publicTransparency !== undefined && input.isTransparencyPageEnabled === undefined && {
+        isTransparencyPageEnabled: input.publicTransparency,
         publicTransparency: input.publicTransparency,
       }),
     },
@@ -944,6 +952,7 @@ export async function updateMosque(
       address: true,
       timezone: true,
       fiscalYearStart: true,
+      isTransparencyPageEnabled: true,
       publicTransparency: true,
       isArchived: true,
       archivedAt: true,
