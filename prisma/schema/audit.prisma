@@ -31,3 +31,4 @@ model AuditLog {
   @@index([createdAt])
   @@map("audit_logs")
 }
+

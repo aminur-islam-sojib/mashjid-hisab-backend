@@ -145,3 +145,4 @@ export const viewSignedAttachmentHandler = catchAsync(
     fs.createReadStream(attachment.storagePath).pipe(res);
   },
 );
+
