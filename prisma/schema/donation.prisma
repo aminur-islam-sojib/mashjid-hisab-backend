@@ -64,6 +64,7 @@ model Donation {
   // Posting lifecycle
   status             DonationStatus @default(PENDING)
   receiptNumber      String?
+  verificationCode   String?        @unique
 
   notes              String?
 

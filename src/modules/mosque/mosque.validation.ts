@@ -198,6 +198,7 @@ export interface UpdateMosqueInput {
   timezone?: string;
   fiscalYearStart?: number;
   confirmFiscalYearChange?: boolean;
+  publicTransparency?: boolean;
 }
 
 /**
@@ -290,13 +291,19 @@ export function validateUpdateMosqueInput(body: unknown): UpdateMosqueInput {
     input.confirmFiscalYearChange = Boolean(confirmVal);
   }
 
+  // -- publicTransparency (optional boolean) ---------------------------------
+  if (raw["publicTransparency"] !== undefined) {
+    hasUpdateFields = true;
+    input.publicTransparency = Boolean(raw["publicTransparency"]);
+  }
+
   if (issues.length > 0) {
     throw HttpError.validationError(issues);
   }
 
   if (!hasUpdateFields) {
     throw HttpError.badRequest(
-      "At least one field must be provided to update (name, address, timezone, or fiscalYearStart).",
+      "At least one field must be provided to update (name, address, timezone, fiscalYearStart, or publicTransparency).",
       "EMPTY_UPDATE_PAYLOAD",
     );
   }

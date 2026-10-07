@@ -31,6 +31,9 @@ model Mosque {
   /// Expense amount threshold (in minor units / poisha) above which treasurer spending requires admin approval.
   expenseApprovalLimit BigInt?
 
+  /// Public transparency toggle — controls whether /api/public/mosques/:slug/transparency is accessible
+  publicTransparency   Boolean   @default(false)
+
   // -- Soft delete / lifecycle ----------------------------------------------
   isArchived Boolean   @default(false)
   archivedAt DateTime?

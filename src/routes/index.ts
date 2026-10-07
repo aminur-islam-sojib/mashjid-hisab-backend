@@ -24,6 +24,7 @@ import { reportRouter, periodRouter } from "../modules/report/report.routes.js";
 import { publicInviteLinkRouter } from "../modules/invite-link/invite-link.routes.js";
 import attachmentRouter from "../modules/attachment/attachment.routes.js";
 import auditRouter from "../modules/audit/audit.routes.js";
+import { publicReceiptRouter } from "../modules/transparency/transparency.routes.js";
 
 const apiRouter: Router = Router();
 
@@ -47,10 +48,11 @@ apiRouter.use("/periods", periodRouter);
 apiRouter.use("/attachments", attachmentRouter);
 apiRouter.use("/audit-logs", auditRouter);
 
-// Public routes (transparency, public mosque profile, donation summaries, invite links)
+// Public routes (transparency, public mosque profile, donation summaries, invite links, receipt verification)
 const publicRouter: Router = Router();
 publicRouter.use("/mosques", publicMosqueRouter);
 publicRouter.use("/invite-links", publicInviteLinkRouter);
+publicRouter.use("/receipts", publicReceiptRouter);
 apiRouter.use("/public", publicRouter);
 
 export default apiRouter;

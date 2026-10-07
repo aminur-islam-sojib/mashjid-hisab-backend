@@ -67,6 +67,13 @@ export class HttpError extends Error {
     return new HttpError(410, message, code);
   }
 
+  static tooManyRequests(
+    message = "Too many requests. Please try again later.",
+    code = "TOO_MANY_REQUESTS",
+  ): HttpError {
+    return new HttpError(429, message, code);
+  }
+
   /**
    * 422 Unprocessable Entity — field-level validation failures.
    * Always includes a `details` array so the client can highlight

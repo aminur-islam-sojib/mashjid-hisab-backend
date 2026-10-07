@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import config from "../../config/index.js";
 import { prisma, isPrismaP2002 } from "../../lib/prisma.js";
 import { HttpError } from "../../errors/HttpError.js";
@@ -470,6 +470,15 @@ export function generateReceiptVerificationCode(params: {
 }
 
 /**
+ * Generates a high-entropy random verification code for donation receipts.
+ * Format: VC-XXXX-XXXX-XXXX
+ */
+export function generateSecureVerificationCode(): string {
+  const bytes = randomBytes(6).toString("hex").toUpperCase();
+  return `VC-${bytes.substring(0, 4)}-${bytes.substring(4, 8)}-${bytes.substring(8, 12)}`;
+}
+
+/**
  * Maps a Prisma donation record with relations to the public response shape.
  */
 function mapDonationResponse(donation: any): DonationResponseItem {
@@ -677,6 +686,7 @@ export async function createDonation(
         // 3. Status and receipt number calculation
         let status: DonationStatus = DonationStatus.PENDING;
         let receiptNumber: string | null = null;
+        let verificationCode: string | null = null;
         let postedById: string | null = null;
         let postedAt: Date | null = null;
 
@@ -687,6 +697,7 @@ export async function createDonation(
             resolvedMosqueId,
             donationYear,
           );
+          verificationCode = generateSecureVerificationCode();
           postedById = actor.userId;
           postedAt = new Date();
         }
@@ -712,6 +723,7 @@ export async function createDonation(
             source: input.source,
             status,
             receiptNumber,
+            verificationCode,
             notes: input.notes ?? null,
             attachments: input.attachments ?? [],
             createdById: actor.userId,
@@ -1122,6 +1134,7 @@ export async function voidDonation(
         source: donation.source,
         status: DonationStatus.POSTED,
         receiptNumber: reversalReceiptNumber,
+        verificationCode: generateSecureVerificationCode(),
         notes: `Reversal entry for receipt ${donation.receiptNumber ?? donation.id}: ${reason}`,
         attachments: donation.attachments,
         reversalOfId: donation.id,
@@ -1236,13 +1249,24 @@ export async function getDonationReceipt(
     }
   }
 
-  const verificationCode = generateReceiptVerificationCode({
-    id: donation.id,
-    receiptNumber: donation.receiptNumber,
-    amount: donation.amount.toString(),
-    mosqueId: donation.mosqueId,
-    createdAt: donation.createdAt,
-  });
+  let verificationCode = donation.verificationCode;
+  if (!verificationCode) {
+    verificationCode = generateReceiptVerificationCode({
+      id: donation.id,
+      receiptNumber: donation.receiptNumber,
+      amount: donation.amount.toString(),
+      mosqueId: donation.mosqueId,
+      createdAt: donation.createdAt,
+    });
+
+    // Best-effort non-blocking backfill for legacy receipt records
+    prisma.donation
+      .update({
+        where: { id: donation.id },
+        data: { verificationCode },
+      })
+      .catch(() => {});
+  }
 
   let donorType: "MEMBER" | "FAMILY" | "WALK_IN" | "ANONYMOUS" = "WALK_IN";
   let donorName = donation.donorName || "Walk-in Donor";

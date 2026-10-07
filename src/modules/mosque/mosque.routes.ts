@@ -24,6 +24,7 @@ import meRouter from "../me/me.routes.js";
 import { reportRouter, periodRouter } from "../report/report.routes.js";
 import attachmentRouter from "../attachment/attachment.routes.js";
 import auditRouter from "../audit/audit.routes.js";
+import { publicTransparencyRouter } from "../transparency/transparency.routes.js";
 import {
   createMosqueHandler,
   getUserMosquesHandler,
@@ -220,6 +221,9 @@ mosqueRouter.post("/", authenticate, createMosqueHandler);
 // Public Mosque Router — Unauthenticated Public Record Endpoints
 // ---------------------------------------------------------------------------
 const publicMosqueRouter: Router = Router();
+
+// Mount public transparency and campaign sub-routes
+publicMosqueRouter.use("/", publicTransparencyRouter);
 
 /**
  * GET /api/public/mosques/:slug
