@@ -20,6 +20,7 @@ import campaignRouter from "../campaign/campaign.routes.js";
 import pledgeRouter from "../pledge/pledge.routes.js";
 import { chandaPlanRouter, dueRouter } from "../chanda/chanda.routes.js";
 import collectionRouter from "../collection/collection.routes.js";
+import meRouter from "../me/me.routes.js";
 import {
   createMosqueHandler,
   getUserMosquesHandler,
@@ -129,6 +130,12 @@ mosqueRouter.use("/:mosqueId/dues", dueRouter);
  * Delegated to Collection Router (counting sessions & box collections)
  */
 mosqueRouter.use("/:mosqueId/collections", collectionRouter);
+
+/**
+ * /api/mosques/:mosqueId/me
+ * Delegated to Member Self-Service Router (donations, dues, pledges, annual statements)
+ */
+mosqueRouter.use("/:mosqueId/me", meRouter);
 
 /**
  * GET /api/mosques/:mosqueId

@@ -206,6 +206,21 @@ export function requireMosqueMembership(
         }
       }
 
+      // Fallback: check JWT claims or user's active membership in DB if not in URL/query/body
+      if (!mosqueId && req.user.mosqueId) {
+        mosqueId = req.user.mosqueId;
+      }
+      if (!mosqueId) {
+        const userMemberships = await prisma.membership.findMany({
+          where: { userId: req.user.sub, status: MembershipStatus.ACTIVE },
+          select: { mosqueId: true },
+          take: 2,
+        });
+        if (userMemberships.length === 1 && userMemberships[0]) {
+          mosqueId = userMemberships[0].mosqueId;
+        }
+      }
+
       if (!mosqueId || typeof mosqueId !== "string" || !mosqueId.trim()) {
         throw HttpError.badRequest(
           "Route is missing required mosqueId identifier.",
