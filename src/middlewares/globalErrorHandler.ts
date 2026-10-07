@@ -64,6 +64,26 @@ export function globalErrorHandler(
   }
 
   // -------------------------------------------------------------------------
+  // Body-parser / Raw-body payload too large error (400 Bad Request)
+  // -------------------------------------------------------------------------
+  if (
+    err &&
+    typeof err === "object" &&
+    (("type" in err && (err as { type: unknown }).type === "entity.too.large") ||
+      ("status" in err && (err as { status: unknown }).status === 413))
+  ) {
+    res.status(400).json({
+      success: false,
+      error: {
+        code: "FILE_TOO_LARGE",
+        message: "Payload too large: exceeds maximum allowed file size limit of 5MB.",
+        details: null,
+      },
+    });
+    return;
+  }
+
+  // -------------------------------------------------------------------------
   // Prisma unique constraint violation (P2002) safety net
   // Converts database-level concurrency races into a clean 409 Conflict
   // -------------------------------------------------------------------------

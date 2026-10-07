@@ -10,10 +10,13 @@ import {
   TransferStatus,
   AccountType,
   FundType,
+  AuditAction,
+  AuditEntity,
   type Prisma,
 } from "../../../generated/prisma/client.js";
 import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
 import { isDateInClosedPeriod } from "../donation/donation.service.js";
+import { recordAuditLog } from "../audit/audit.service.js";
 import {
   getAccountBalance,
   getFundBalance,
@@ -476,6 +479,25 @@ export async function createTransfer(
         include: TRANSFER_LEG_INCLUDE,
       });
 
+      await recordAuditLog(tx, {
+        mosqueId: resolvedMosqueId,
+        actorId: actor.userId,
+        action: AuditAction.TRANSFER,
+        entity: AuditEntity.TRANSFER,
+        entityId: transferNumber,
+        summary: `Transfer ${transferNumber} recorded for amount ${input.amount.toString()} poisha${isFundTransfer ? " (fund-to-fund)" : ""}`,
+        metadata: {
+          transferNumber,
+          amount: input.amount.toString(),
+          fromAccountId: input.fromAccountId,
+          toAccountId: input.toAccountId,
+          fromFundId: input.fromFundId,
+          toFundId: input.toFundId,
+          isFundTransfer,
+          reason: input.reason ?? null,
+        },
+      });
+
       return mapTransferPairResponse(updatedFromLeg, toLeg);
     });
 
@@ -860,6 +882,21 @@ export async function voidTransfer(
       where: { id: reversalFromLeg.id },
       data: { linkedTransferId: reversalToLeg.id },
       include: TRANSFER_LEG_INCLUDE,
+    });
+
+    await recordAuditLog(tx, {
+      mosqueId: resolvedMosqueId,
+      actorId: actor.userId,
+      action: AuditAction.VOID,
+      entity: AuditEntity.TRANSFER,
+      entityId: fromLeg.transferNumber,
+      summary: `Transfer ${fromLeg.transferNumber} voided with reversal ${reversalTransferNumber}: ${reason}`,
+      metadata: {
+        transferNumber: fromLeg.transferNumber,
+        reversalTransferNumber,
+        reason,
+        amount: fromLeg.amount.toString(),
+      },
     });
 
     // 6. Compute restored balances

@@ -58,6 +58,8 @@ model Mosque {
   periodAuditLogs        PeriodAuditLog[]
   accountReconciliations AccountReconciliation[]
   reportExports          ReportExport[]
+  attachments            Attachment[]
+  auditLogs              AuditLog[]
 
   @@map("mosques")
 }

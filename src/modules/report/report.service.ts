@@ -18,8 +18,11 @@ import {
   ReportType,
   ExportFormat,
   ExportStatus,
+  AuditAction,
+  AuditEntity,
 } from "../../../generated/prisma/client.js";
 import { isDateInClosedPeriod } from "../donation/donation.service.js";
+import { recordAuditLog } from "../audit/audit.service.js";
 import type {
   BalancesReportQueryInput,
   IncomeExpenseReportQueryInput,
@@ -1680,6 +1683,16 @@ export async function closeAccountingPeriod(
       },
     });
 
+    await recordAuditLog(tx, {
+      mosqueId,
+      actorId: userId,
+      action: AuditAction.CLOSE_PERIOD,
+      entity: AuditEntity.PERIOD,
+      entityId: period,
+      summary: `Locked accounting period ${period}`,
+      metadata: { period, closedPeriodUntil: endOfMonth },
+    });
+
     return {
       message: `Accounting period ${period} has been locked. Entries on or before this period cannot be posted, approved, or voided.`,
       period,
@@ -1738,6 +1751,16 @@ export async function reopenAccountingPeriod(
         reason,
         performedById: userId,
       },
+    });
+
+    await recordAuditLog(tx, {
+      mosqueId,
+      actorId: userId,
+      action: AuditAction.REOPEN_PERIOD,
+      entity: AuditEntity.PERIOD,
+      entityId: period,
+      summary: `Reopened accounting period ${period}: ${reason}`,
+      metadata: { period, reason, closedPeriodUntil: previousMonthEnd },
     });
 
     return {
@@ -1857,6 +1880,20 @@ export async function reconcileAccount(
       },
     });
 
+    await recordAuditLog(prisma, {
+      mosqueId,
+      actorId: userId,
+      action: AuditAction.RECONCILE,
+      entity: AuditEntity.ACCOUNT,
+      entityId: account.id,
+      summary: `Reconciled account ${account.name} (Matched system balance of ${formatPoishaToCurrency(systemBalance)})`,
+      metadata: {
+        systemBalance: systemBalance.toString(),
+        realBalance: input.realBalance.toString(),
+        difference: "0",
+      },
+    });
+
     return {
       reconciliationId: reconciliation.id,
       accountId: account.id,
@@ -1957,6 +1994,22 @@ export async function reconcileAccount(
         },
       });
 
+      await recordAuditLog(tx, {
+        mosqueId,
+        actorId: userId,
+        action: AuditAction.RECONCILE,
+        entity: AuditEntity.ACCOUNT,
+        entityId: account.id,
+        summary: `Reconciled account ${account.name} (Surplus adjustment: +${formatPoishaToCurrency(difference)} taka)`,
+        metadata: {
+          systemBalance: systemBalance.toString(),
+          realBalance: input.realBalance.toString(),
+          difference: difference.toString(),
+          adjustmentType: "DONATION",
+          receiptNumber: adjustmentDonation.receiptNumber,
+        },
+      });
+
       return {
         reconciliationId: reconciliation.id,
         accountId: account.id,
@@ -2038,6 +2091,22 @@ export async function reconcileAccount(
         notes: input.notes,
         reconciledById: userId,
         adjustmentExpenseId: adjustmentExpense.id,
+      },
+    });
+
+    await recordAuditLog(tx, {
+      mosqueId,
+      actorId: userId,
+      action: AuditAction.RECONCILE,
+      entity: AuditEntity.ACCOUNT,
+      entityId: account.id,
+      summary: `Reconciled account ${account.name} (Shortfall adjustment: -${formatPoishaToCurrency(shortfall)} taka)`,
+      metadata: {
+        systemBalance: systemBalance.toString(),
+        realBalance: input.realBalance.toString(),
+        difference: difference.toString(),
+        adjustmentType: "EXPENSE",
+        voucherNo: adjustmentExpense.voucherNo,
       },
     });
 

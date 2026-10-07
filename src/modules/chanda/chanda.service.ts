@@ -11,9 +11,12 @@ import {
   DueStatus,
   DonationStatus,
   MembershipStatus,
+  AuditAction,
+  AuditEntity,
   type Prisma,
 } from "../../../generated/prisma/client.js";
 import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
+import { recordAuditLog } from "../audit/audit.service.js";
 import {
   validateDonationFinanceEntities,
   generateNextReceiptNumber,
@@ -1004,6 +1007,20 @@ export async function waiveDue(
       waiveReason: input.reason,
     },
     include: DUE_DEFAULT_INCLUDE,
+  });
+
+  await recordAuditLog(prisma, {
+    mosqueId: resolvedMosqueId,
+    actorId: actor.userId,
+    action: AuditAction.WAIVE,
+    entity: AuditEntity.DUE,
+    entityId: due.id,
+    summary: `Waived monthly due for period ${due.period} (${due.amount.toString()} poisha): ${input.reason}`,
+    metadata: {
+      period: due.period,
+      amount: due.amount.toString(),
+      reason: input.reason,
+    },
   });
 
   return mapDueResponse(updated);

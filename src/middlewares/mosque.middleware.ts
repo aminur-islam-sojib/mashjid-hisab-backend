@@ -214,6 +214,16 @@ export function requireMosqueMembership(
         }
       }
 
+      if (!mosqueId && req.params["attachmentId"]) {
+        const attachmentRecord = await prisma.attachment.findUnique({
+          where: { id: String(req.params["attachmentId"]) },
+          select: { mosqueId: true },
+        });
+        if (attachmentRecord) {
+          mosqueId = attachmentRecord.mosqueId;
+        }
+      }
+
       if (!mosqueId && paramId) {
         const mosqueRecord = await prisma.mosque.findFirst({
           where: { OR: [{ id: paramId }, { slug: paramId }] },
@@ -236,7 +246,15 @@ export function requireMosqueMembership(
             if (expenseRecord) {
               mosqueId = expenseRecord.mosqueId;
             } else {
-              mosqueId = paramId;
+              const attachmentRecord = await prisma.attachment.findUnique({
+                where: { id: paramId },
+                select: { mosqueId: true },
+              });
+              if (attachmentRecord) {
+                mosqueId = attachmentRecord.mosqueId;
+              } else {
+                mosqueId = paramId;
+              }
             }
           }
         }

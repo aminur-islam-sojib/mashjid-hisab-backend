@@ -10,6 +10,8 @@ import {
   MembershipStatus,
   AccountType,
   FundType,
+  AuditAction,
+  AuditEntity,
   type Prisma,
 } from "../../../generated/prisma/client.js";
 import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
@@ -20,6 +22,7 @@ import type {
 } from "./donation.validation.js";
 import { syncPledgeStatus } from "../pledge/pledge.service.js";
 import { syncDueStatus } from "../chanda/chanda.service.js";
+import { recordAuditLog } from "../audit/audit.service.js";
 
 export interface DonationActor {
   userId: string;
@@ -736,6 +739,21 @@ export async function createDonation(
           await syncPledgeStatus(tx, input.pledgeId);
         }
 
+        await recordAuditLog(tx, {
+          mosqueId: resolvedMosqueId,
+          actorId: actor.userId,
+          action: AuditAction.CREATE,
+          entity: AuditEntity.DONATION,
+          entityId: donation.id,
+          summary: `Recorded donation of ${donation.amount.toString()} poisha (${receiptNumber || "PENDING"})`,
+          metadata: {
+            amount: donation.amount.toString(),
+            receiptNumber,
+            status: donation.status,
+            donorName: donorSnapshot.donorName,
+          },
+        });
+
         return donation;
       });
 
@@ -1126,6 +1144,21 @@ export async function voidDonation(
     if (donation.dueId) {
       await syncDueStatus(tx, donation.dueId);
     }
+
+    await recordAuditLog(tx, {
+      mosqueId: resolvedMosqueId,
+      actorId: actor.userId,
+      action: AuditAction.VOID,
+      entity: AuditEntity.DONATION,
+      entityId: donation.id,
+      summary: `Voided donation (${donation.receiptNumber || donation.id}): ${reason}`,
+      metadata: {
+        amount: donation.amount.toString(),
+        reason,
+        receiptNumber: donation.receiptNumber,
+        reversalReceiptNumber,
+      },
+    });
 
     return {
       voidedDonation: mapDonationResponse(voided),

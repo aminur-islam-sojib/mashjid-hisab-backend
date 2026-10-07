@@ -254,3 +254,33 @@ enum ReportType {
   DONORS
   FISCAL_YEAR
 }
+
+// ---------------------------------------------------------------------------
+// AuditAction
+// Actions performed on financial transactions and ledger records.
+// ---------------------------------------------------------------------------
+enum AuditAction {
+  CREATE
+  APPROVE
+  VOID
+  WAIVE
+  REJECT
+  CLOSE_PERIOD
+  REOPEN_PERIOD
+  RECONCILE
+  TRANSFER
+}
+
+// ---------------------------------------------------------------------------
+// AuditEntity
+// Type of financial entity affected by the action.
+// ---------------------------------------------------------------------------
+enum AuditEntity {
+  DONATION
+  EXPENSE
+  TRANSFER
+  DUE
+  PERIOD
+  COLLECTION
+  ACCOUNT
+}

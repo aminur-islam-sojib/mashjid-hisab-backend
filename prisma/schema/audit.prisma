@@ -1,0 +1,33 @@
+// =============================================================================
+// audit.prisma — Domain 11: Financial Audit Logging
+// =============================================================================
+
+model AuditLog {
+  id          String      @id @default(cuid())
+  mosqueId    String
+  mosque      Mosque      @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  action      AuditAction
+  entity      AuditEntity
+  entityId    String
+
+  // Human-readable summary of the action performed
+  summary     String
+  // Structured parameters (amount, receipt/voucher number, notes, reason, etc.)
+  metadata    Json?
+
+  actorId     String
+  actor       User        @relation("AuditActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  ipAddress   String?
+  userAgent   String?
+
+  createdAt   DateTime    @default(now())
+
+  @@index([mosqueId])
+  @@index([actorId])
+  @@index([entity])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

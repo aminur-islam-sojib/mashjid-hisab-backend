@@ -22,6 +22,8 @@ import { chandaPlanRouter, dueRouter } from "../chanda/chanda.routes.js";
 import collectionRouter from "../collection/collection.routes.js";
 import meRouter from "../me/me.routes.js";
 import { reportRouter, periodRouter } from "../report/report.routes.js";
+import attachmentRouter from "../attachment/attachment.routes.js";
+import auditRouter from "../audit/audit.routes.js";
 import {
   createMosqueHandler,
   getUserMosquesHandler,
@@ -149,6 +151,18 @@ mosqueRouter.use("/:mosqueId/reports", reportRouter);
  * Delegated to Period Router (accounting period lock & reopen)
  */
 mosqueRouter.use("/:mosqueId/periods", periodRouter);
+
+/**
+ * /api/mosques/:mosqueId/attachments
+ * Delegated to Attachment Router (upload, view, signed download links)
+ */
+mosqueRouter.use("/:mosqueId/attachments", attachmentRouter);
+
+/**
+ * /api/mosques/:mosqueId/audit-logs
+ * Delegated to Audit Router (compliance audit logs)
+ */
+mosqueRouter.use("/:mosqueId/audit-logs", auditRouter);
 
 /**
  * GET /api/mosques/:mosqueId

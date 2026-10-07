@@ -74,6 +74,8 @@ model User {
   reconciledAccounts      AccountReconciliation[] @relation("AccountReconciler")
   periodAudits            PeriodAuditLog[]        @relation("PeriodAuditor")
   requestedExports        ReportExport[]          @relation("ReportExporter")
+  uploadedAttachments     Attachment[]            @relation("AttachmentUploader")
+  performedAudits         AuditLog[]              @relation("AuditActor")
 
   @@map("users")
 }

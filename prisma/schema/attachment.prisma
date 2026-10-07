@@ -1,0 +1,24 @@
+// =============================================================================
+// attachment.prisma — Domain 11: File Attachments (Bills, Receipts, Documents)
+// =============================================================================
+
+model Attachment {
+  id           String   @id @default(cuid())
+  mosqueId     String
+  mosque       Mosque   @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  fileName     String
+  fileSize     Int      // bytes
+  mimeType     String   // "image/jpeg", "image/png", "image/webp", "application/pdf"
+  storagePath  String   // Internal path on disk or object storage
+
+  uploadedById String
+  uploadedBy   User     @relation("AttachmentUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([mosqueId])
+  @@index([uploadedById])
+  @@map("attachments")
+}

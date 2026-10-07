@@ -10,9 +10,12 @@ import {
   ExpenseStatus,
   TransferLeg,
   TransferStatus,
+  AuditAction,
+  AuditEntity,
   type Prisma,
 } from "../../../generated/prisma/client.js";
 import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
+import { recordAuditLog } from "../audit/audit.service.js";
 import {
   isDateInClosedPeriod,
   generateNextReceiptNumber,
@@ -1089,6 +1092,21 @@ export async function approveTransaction(
         await syncDueStatus(tx, donation.dueId);
       }
 
+      await recordAuditLog(tx, {
+        mosqueId: resolvedMosqueId,
+        actorId: actor.userId,
+        action: AuditAction.APPROVE,
+        entity: AuditEntity.DONATION,
+        entityId: updatedDonation.id,
+        summary: `Donation ${updatedDonation.id} approved by ${actor.role} (Receipt: ${updatedDonation.receiptNumber})`,
+        metadata: {
+          donationId: updatedDonation.id,
+          receiptNumber: updatedDonation.receiptNumber,
+          amount: updatedDonation.amount.toString(),
+          donorName: updatedDonation.donorName,
+        },
+      });
+
       return updatedDonation;
     });
 
@@ -1193,7 +1211,7 @@ export async function approveTransaction(
       }
 
       const now = new Date();
-      return tx.expense.update({
+      const updatedExpense = await tx.expense.update({
         where: { id: expense.id },
         data: {
           status: ExpenseStatus.POSTED,
@@ -1212,6 +1230,23 @@ export async function approveTransaction(
           postedBy: { select: { id: true, name: true, email: true } },
         },
       });
+
+      await recordAuditLog(tx, {
+        mosqueId: resolvedMosqueId,
+        actorId: actor.userId,
+        action: AuditAction.APPROVE,
+        entity: AuditEntity.EXPENSE,
+        entityId: updatedExpense.id,
+        summary: `Expense ${updatedExpense.id} approved by ${actor.role} (Voucher: ${updatedExpense.voucherNo})`,
+        metadata: {
+          expenseId: updatedExpense.id,
+          voucherNo: updatedExpense.voucherNo,
+          amount: updatedExpense.amount.toString(),
+          payee: updatedExpense.payee,
+        },
+      });
+
+      return updatedExpense;
     });
 
     return {
@@ -1329,6 +1364,20 @@ export async function rejectTransaction(
       `🔔 [NOTIFICATION DISPATCHED] To User: ${updated.createdBy?.email ?? updated.createdById} — ${notificationMessage}`,
     );
 
+    await recordAuditLog(prisma, {
+      mosqueId: resolvedMosqueId,
+      actorId: actor.userId,
+      action: AuditAction.REJECT,
+      entity: AuditEntity.DONATION,
+      entityId: updated.id,
+      summary: `Donation ${updated.id} rejected by ${actor.role}: ${input.reason}`,
+      metadata: {
+        donationId: updated.id,
+        reason: input.reason,
+        amount: updated.amount.toString(),
+      },
+    });
+
     return {
       transaction: {
         id: updated.id,
@@ -1418,6 +1467,21 @@ export async function rejectTransaction(
     console.log(
       `🔔 [NOTIFICATION DISPATCHED] To User: ${updated.createdBy?.email ?? updated.createdById} — ${notificationMessage}`,
     );
+
+    await recordAuditLog(prisma, {
+      mosqueId: resolvedMosqueId,
+      actorId: actor.userId,
+      action: AuditAction.REJECT,
+      entity: AuditEntity.EXPENSE,
+      entityId: updated.id,
+      summary: `Expense ${updated.id} rejected by ${actor.role}: ${input.reason}`,
+      metadata: {
+        expenseId: updated.id,
+        reason: input.reason,
+        amount: updated.amount.toString(),
+        payee: updated.payee,
+      },
+    });
 
     return {
       transaction: {

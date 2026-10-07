@@ -13,10 +13,13 @@ import {
   CategoryType,
   AccountType,
   FundType,
+  AuditAction,
+  AuditEntity,
   type Prisma,
 } from "../../../generated/prisma/client.js";
 import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
 import { isDateInClosedPeriod } from "../donation/donation.service.js";
+import { recordAuditLog } from "../audit/audit.service.js";
 import type {
   CreateExpenseInput,
   GetMosqueExpensesQueryInput,
@@ -790,6 +793,21 @@ export async function createExpense(
         include: EXPENSE_DEFAULT_INCLUDE,
       });
 
+      await recordAuditLog(tx, {
+        mosqueId: resolvedMosqueId,
+        actorId: actor.userId,
+        action: AuditAction.CREATE,
+        entity: AuditEntity.EXPENSE,
+        entityId: expense.id,
+        summary: `Recorded expense of ${expense.amount.toString()} poisha for ${expense.payee} (${expense.voucherNo || "PENDING"})`,
+        metadata: {
+          amount: expense.amount.toString(),
+          voucherNo: expense.voucherNo,
+          payee: expense.payee,
+          status: expense.status,
+        },
+      });
+
       return expense;
     });
 
@@ -1168,6 +1186,21 @@ export async function voidExpense(
     // Compute restored balances
     const restoredAccountBalance = await getAccountBalance(tx, expense.accountId);
     const restoredFundBalance = await getFundBalance(tx, expense.fundId);
+
+    await recordAuditLog(tx, {
+      mosqueId: resolvedMosqueId,
+      actorId: actor.userId,
+      action: AuditAction.VOID,
+      entity: AuditEntity.EXPENSE,
+      entityId: expense.id,
+      summary: `Voided expense (${expense.voucherNo || expense.id}): ${reason}`,
+      metadata: {
+        amount: expense.amount.toString(),
+        reason,
+        voucherNo: expense.voucherNo,
+        reversalVoucherNo,
+      },
+    });
 
     return {
       voidedExpense: mapExpenseResponse(voided),
