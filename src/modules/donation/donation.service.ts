@@ -767,7 +767,7 @@ export async function createDonation(
         });
 
         return donation;
-      });
+      }, { maxWait: 10000, timeout: 25000 });
 
       return mapDonationResponse(created);
     } catch (error) {
@@ -1177,7 +1177,7 @@ export async function voidDonation(
       voidedDonation: mapDonationResponse(voided),
       reversalEntry: mapDonationResponse(reversal),
     };
-  });
+  }, { maxWait: 10000, timeout: 25000 });
 
   return result;
 }

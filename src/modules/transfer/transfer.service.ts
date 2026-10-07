@@ -499,7 +499,7 @@ export async function createTransfer(
       });
 
       return mapTransferPairResponse(updatedFromLeg, toLeg);
-    });
+    }, { maxWait: 10000, timeout: 25000 });
 
     return result;
   } catch (error) {
@@ -925,7 +925,7 @@ export async function voidTransfer(
         toFundBalance: toFundBal.toString(),
       },
     };
-  });
+  }, { maxWait: 10000, timeout: 25000 });
 
   return result;
 }

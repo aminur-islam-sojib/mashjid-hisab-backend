@@ -809,7 +809,7 @@ export async function createExpense(
       });
 
       return expense;
-    });
+    }, { maxWait: 10000, timeout: 25000 });
 
     return mapExpenseResponse(created);
   } catch (error: any) {
@@ -1208,7 +1208,7 @@ export async function voidExpense(
       restoredAccountBalance: restoredAccountBalance.toString(),
       restoredFundBalance: restoredFundBalance.toString(),
     };
-  });
+  }, { maxWait: 10000, timeout: 25000 });
 
   return result;
 }

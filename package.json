@@ -8,7 +8,7 @@
   "main": "server.ts",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "tsx --test --test-concurrency=1 \"tests/**/*.test.ts\""
   },
   "devDependencies": {
     "@types/multer": "^2.3.0",
