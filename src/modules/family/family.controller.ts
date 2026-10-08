@@ -69,10 +69,11 @@ export const createFamilyHandler = catchAsync(
 export const getMosqueFamiliesHandler = catchAsync(
   async (req: Request, res: Response): Promise<void> => {
     const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const membership = requireMembership(req);
     const search =
       typeof req.query["search"] === "string" ? req.query["search"].trim() : undefined;
 
-    const families = await getMosqueFamilies(mosqueId, { search });
+    const families = await getMosqueFamilies(mosqueId, membership, { search });
 
     sendResponse(res, {
       statusCode: 200,

@@ -37,14 +37,14 @@ familyRouter.post(
 
 /**
  * GET /api/mosques/:mosqueId/families
- * Access: Authenticated + MOSQUE_ADMIN, TREASURER, COMMITTEE_MEMBER
+ * Access: Authenticated, any ACTIVE member (oversight roles see all; plain members see own family)
  *
- * Lists every family in the mosque — the admin's household view.
+ * Lists families in the mosque.
  */
 familyRouter.get(
   "/",
   authenticate,
-  requireMosqueMembership(...OVERSIGHT_ROLES),
+  requireMosqueMembership(),
   getMosqueFamiliesHandler,
 );
 

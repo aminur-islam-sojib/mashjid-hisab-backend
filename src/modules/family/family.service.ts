@@ -73,9 +73,11 @@ function assertFamilyHeadOrAdmin(
   callerMembership: Membership,
 ): void {
   const isHead = family.headMembershipId === callerMembership.id;
-  const isAdmin = callerMembership.role === Role.MOSQUE_ADMIN;
+  const isOversight = (
+    [Role.MOSQUE_ADMIN, Role.TREASURER, Role.COMMITTEE_MEMBER] as Role[]
+  ).includes(callerMembership.role);
 
-  if (!isHead && !isAdmin) {
+  if (!isHead && !isOversight) {
     throw HttpError.notFound("Family not found.", "FAMILY_NOT_FOUND");
   }
 }
@@ -137,33 +139,54 @@ export interface GetMosqueFamiliesOptions {
 }
 
 /**
- * Lists every Family in the mosque — oversight-roles only (gated at the
- * route via OVERSIGHT_ROLES), so no ownership filtering needed here.
+ * Lists Families in the mosque:
+ * - OVERSIGHT_ROLES see every family in the mosque.
+ * - Regular members see their own family (as head or linked member).
  */
 export async function getMosqueFamilies(
   mosqueId: string,
+  callerMembership: Membership,
   options: GetMosqueFamiliesOptions = {},
 ) {
   const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
   const search = options.search?.trim();
 
+  const isOversight = (
+    [Role.MOSQUE_ADMIN, Role.TREASURER, Role.COMMITTEE_MEMBER] as Role[]
+  ).includes(callerMembership.role);
+
+  const whereClause: Prisma.FamilyWhereInput = {
+    mosqueId: resolvedMosqueId,
+    ...(!isOversight
+      ? {
+          OR: [
+            { headMembershipId: callerMembership.id },
+            { members: { some: { linkedMembershipId: callerMembership.id } } },
+          ],
+        }
+      : {}),
+    ...(search
+      ? {
+          AND: [
+            {
+              OR: [
+                { name: { contains: search, mode: "insensitive" as const } },
+                { headMembership: { user: { name: { contains: search, mode: "insensitive" as const } } } },
+                { headMembership: { user: { phone: { contains: search, mode: "insensitive" as const } } } },
+              ],
+            },
+          ],
+        }
+      : {}),
+  };
+
   return prisma.family.findMany({
-    where: {
-      mosqueId: resolvedMosqueId,
-      ...(search
-        ? {
-            OR: [
-              { name: { contains: search, mode: "insensitive" as const } },
-              { headMembership: { user: { name: { contains: search, mode: "insensitive" as const } } } },
-              { headMembership: { user: { phone: { contains: search, mode: "insensitive" as const } } } },
-            ],
-          }
-        : {}),
-    },
+    where: whereClause,
     include: {
       headMembership: {
         include: { user: { select: { id: true, name: true, email: true, phone: true } } },
       },
+      members: { orderBy: { createdAt: "asc" } },
       _count: { select: { members: true } },
     },
     orderBy: { createdAt: "desc" },
