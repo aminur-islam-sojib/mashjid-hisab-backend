@@ -305,12 +305,39 @@ export async function getDashboardReport(mosqueId: string) {
   };
 }
 
+function toStartDate(val: unknown, fallback?: Date): Date {
+  if (val instanceof Date) return val;
+  if (typeof val === "string" && val.trim()) {
+    const s = val.trim();
+    return new Date(s.length === 10 ? `${s}T00:00:00.000Z` : s);
+  }
+  return fallback ?? new Date(Date.UTC(new Date().getUTCFullYear(), 0, 1, 0, 0, 0, 0));
+}
+
+function toEndDate(val: unknown, fallback?: Date): Date {
+  if (val instanceof Date) return val;
+  if (typeof val === "string" && val.trim()) {
+    const s = val.trim();
+    return new Date(s.length === 10 ? `${s}T23:59:59.999Z` : s);
+  }
+  return fallback ?? new Date(Date.UTC(new Date().getUTCFullYear(), 11, 31, 23, 59, 59, 999));
+}
+
+function toAsOfDate(val: unknown, fallback?: Date): Date {
+  if (val instanceof Date) return val;
+  if (typeof val === "string" && val.trim()) {
+    const s = val.trim();
+    return new Date(s.length === 10 ? `${s}T23:59:59.999Z` : s);
+  }
+  return fallback ?? new Date();
+}
+
 // =============================================================================
 // 2. GET /reports/balances?asOf=
 // =============================================================================
 
 export async function getBalancesReport(mosqueId: string, query: BalancesReportQueryInput) {
-  const cutoffDate = query.asOf ?? new Date();
+  const cutoffDate = toAsOfDate(query.asOf);
 
   const [accounts, funds] = await Promise.all([
     prisma.account.findMany({
@@ -394,7 +421,9 @@ export async function getBalancesReport(mosqueId: string, query: BalancesReportQ
         openingBalance: acc.openingBalance.toString(),
         formattedOpeningBalance: formatPoishaToCurrency(acc.openingBalance),
         balance: balance.toString(),
+        currentBalance: balance.toString(),
         formattedBalance: formatPoishaToCurrency(balance),
+        formattedCurrentBalance: formatPoishaToCurrency(balance),
       };
     }),
   );
@@ -465,7 +494,9 @@ export async function getBalancesReport(mosqueId: string, query: BalancesReportQ
         type: f.type,
         isRestricted: f.isRestricted,
         balance: balance.toString(),
+        currentBalance: balance.toString(),
         formattedBalance: formatPoishaToCurrency(balance),
+        formattedCurrentBalance: formatPoishaToCurrency(balance),
       };
     }),
   );
@@ -474,10 +505,14 @@ export async function getBalancesReport(mosqueId: string, query: BalancesReportQ
     asOf: cutoffDate,
     accounts: accountsBalances,
     totalAccountsBalance: totalAccountsBalance.toString(),
+    totalAccountBalance: totalAccountsBalance.toString(),
     formattedTotalAccountsBalance: formatPoishaToCurrency(totalAccountsBalance),
+    formattedTotalAccountBalance: formatPoishaToCurrency(totalAccountsBalance),
     funds: fundsBalances,
     totalFundsBalance: totalFundsBalance.toString(),
+    totalFundBalance: totalFundsBalance.toString(),
     formattedTotalFundsBalance: formatPoishaToCurrency(totalFundsBalance),
+    formattedTotalFundBalance: formatPoishaToCurrency(totalFundsBalance),
   };
 }
 
@@ -489,9 +524,8 @@ export async function getIncomeExpenseReport(
   mosqueId: string,
   query: IncomeExpenseReportQueryInput,
 ) {
-  const now = new Date();
-  const startDate = query.startDate ?? new Date(Date.UTC(now.getUTCFullYear(), 0, 1, 0, 0, 0, 0));
-  const endDate = query.endDate ?? new Date(Date.UTC(now.getUTCFullYear(), 11, 31, 23, 59, 59, 999));
+  const startDate = toStartDate(query.startDate);
+  const endDate = toEndDate(query.endDate);
   const groupBy = query.groupBy ?? "month";
 
   const donationWhere: any = {
@@ -567,6 +601,8 @@ export async function getIncomeExpenseReport(
       return {
         fundId: fund.id,
         fundName: fund.name,
+        name: fund.name,
+        label: fund.name,
         fundType: fund.type,
         income: income.toString(),
         formattedIncome: formatPoishaToCurrency(income),
@@ -583,10 +619,16 @@ export async function getIncomeExpenseReport(
       totalIncome: totalIncome.toString(),
       formattedTotalIncome: formatPoishaToCurrency(totalIncome),
       totalExpense: totalExpense.toString(),
+      totalExpenses: totalExpense.toString(),
       formattedTotalExpense: formatPoishaToCurrency(totalExpense),
+      formattedTotalExpenses: formatPoishaToCurrency(totalExpense),
       netSurplus: netSurplus.toString(),
+      netSavings: netSurplus.toString(),
       formattedNetSurplus: formatPoishaToCurrency(netSurplus),
+      formattedNetSavings: formatPoishaToCurrency(netSurplus),
       data: fundsList,
+      breakdown: fundsList,
+      items: fundsList,
     };
   }
 
@@ -610,20 +652,30 @@ export async function getIncomeExpenseReport(
     const incomeCategories = Array.from(incomeCatMap.values()).map(({ category, amount, count }) => ({
       categoryId: category.id,
       categoryName: category.name,
+      name: category.name,
+      label: category.name,
       type: "INCOME",
       amount: amount.toString(),
       formattedAmount: formatPoishaToCurrency(amount),
+      income: amount.toString(),
+      expense: "0",
       count,
     }));
 
     const expenseCategories = Array.from(expenseCatMap.values()).map(({ category, amount, count }) => ({
       categoryId: category.id,
       categoryName: category.name,
+      name: category.name,
+      label: category.name,
       type: "EXPENSE",
       amount: amount.toString(),
       formattedAmount: formatPoishaToCurrency(amount),
+      income: "0",
+      expense: amount.toString(),
       count,
     }));
+
+    const combinedBreakdown = [...incomeCategories, ...expenseCategories];
 
     return {
       period: { startDate, endDate },
@@ -631,11 +683,18 @@ export async function getIncomeExpenseReport(
       totalIncome: totalIncome.toString(),
       formattedTotalIncome: formatPoishaToCurrency(totalIncome),
       totalExpense: totalExpense.toString(),
+      totalExpenses: totalExpense.toString(),
       formattedTotalExpense: formatPoishaToCurrency(totalExpense),
+      formattedTotalExpenses: formatPoishaToCurrency(totalExpense),
       netSurplus: netSurplus.toString(),
+      netSavings: netSurplus.toString(),
       formattedNetSurplus: formatPoishaToCurrency(netSurplus),
+      formattedNetSavings: formatPoishaToCurrency(netSurplus),
       incomeCategories,
       expenseCategories,
+      data: combinedBreakdown,
+      breakdown: combinedBreakdown,
+      items: combinedBreakdown,
     };
   }
 
@@ -662,6 +721,8 @@ export async function getIncomeExpenseReport(
     const net = income - expense;
     return {
       month,
+      name: month,
+      label: month,
       income: income.toString(),
       formattedIncome: formatPoishaToCurrency(income),
       expense: expense.toString(),
@@ -677,10 +738,16 @@ export async function getIncomeExpenseReport(
     totalIncome: totalIncome.toString(),
     formattedTotalIncome: formatPoishaToCurrency(totalIncome),
     totalExpense: totalExpense.toString(),
+    totalExpenses: totalExpense.toString(),
     formattedTotalExpense: formatPoishaToCurrency(totalExpense),
+    formattedTotalExpenses: formatPoishaToCurrency(totalExpense),
     netSurplus: netSurplus.toString(),
+    netSavings: netSurplus.toString(),
     formattedNetSurplus: formatPoishaToCurrency(netSurplus),
+    formattedNetSavings: formatPoishaToCurrency(netSurplus),
     data: monthlyData,
+    breakdown: monthlyData,
+    items: monthlyData,
   };
 }
 
@@ -1144,14 +1211,17 @@ export async function getDonorsReport(
   const groupBy = query.groupBy ?? "member";
   const limit = query.limit ?? 50;
 
+  const startDate = query.startDate ? toStartDate(query.startDate) : undefined;
+  const endDate = query.endDate ? toEndDate(query.endDate) : undefined;
+
   const whereDonation: any = {
     mosqueId,
     status: DonationStatus.POSTED,
-    ...(query.startDate || query.endDate
+    ...(startDate || endDate
       ? {
           date: {
-            ...(query.startDate ? { gte: query.startDate } : {}),
-            ...(query.endDate ? { lte: query.endDate } : {}),
+            ...(startDate ? { gte: startDate } : {}),
+            ...(endDate ? { lte: endDate } : {}),
           },
         }
       : {}),
@@ -1234,7 +1304,11 @@ export async function getDonorsReport(
 
     const topDonors = familyList.slice(0, limit).map((f) => ({
       ...f,
+      name: f.familyName,
       totalGiven: f.totalGiven.toString(),
+      totalAmount: f.totalGiven.toString(),
+      count: f.donationCount,
+      donationCount: f.donationCount,
       formattedTotalGiven: formatPoishaToCurrency(f.totalGiven),
     }));
 
@@ -1242,6 +1316,8 @@ export async function getDonorsReport(
       groupBy: "family",
       count: familyList.length,
       donors: topDonors,
+      topDonors,
+      data: topDonors,
     };
   }
 
@@ -1298,12 +1374,18 @@ export async function getDonorsReport(
   const lapsedDonors = allDonors.filter((d) => d.lastDonatedAt < sixtyDaysAgo).map((d) => ({
     ...d,
     totalGiven: d.totalGiven.toString(),
+    totalAmount: d.totalGiven.toString(),
+    count: d.donationCount,
+    donationCount: d.donationCount,
     formattedTotalGiven: formatPoishaToCurrency(d.totalGiven),
   }));
 
   const topDonors = allDonors.slice(0, limit).map((d) => ({
     ...d,
     totalGiven: d.totalGiven.toString(),
+    totalAmount: d.totalGiven.toString(),
+    count: d.donationCount,
+    donationCount: d.donationCount,
     formattedTotalGiven: formatPoishaToCurrency(d.totalGiven),
   }));
 
@@ -1319,6 +1401,8 @@ export async function getDonorsReport(
     totalGiving: totalGiving.toString(),
     formattedTotalGiving: formatPoishaToCurrency(totalGiving),
     topDonors,
+    donors: topDonors,
+    data: topDonors,
     lapsedDonors: lapsedDonors.slice(0, limit),
   };
 }
@@ -1528,43 +1612,72 @@ export async function createReportExport(
   switch (input.reportType) {
     case ReportType.BALANCES: {
       const data = await getBalancesReport(mosqueId, params);
-      const rows = [
-        ...data.accounts.map((a) => ["ACCOUNT", a.name, a.type, a.formattedBalance]),
-        ...data.funds.map((f) => ["FUND", f.name, f.type, f.formattedBalance]),
-      ];
-      fileContent = convertToCsv(["Dimension", "Name", "Type", "Balance"], rows);
+      const rows: (string | number)[][] = [];
+      (data.accounts || []).forEach((a) => {
+        rows.push(["Asset Account", a.name, a.type, a.formattedBalance]);
+      });
+      rows.push(["Summary", "Total Accounts Balance", "", data.formattedTotalAccountsBalance]);
+      (data.funds || []).forEach((f) => {
+        rows.push(["Fund Equity", f.name, f.isRestricted ? "Restricted" : "Unrestricted", f.formattedBalance]);
+      });
+      rows.push(["Summary", "Total Funds Balance", "", data.formattedTotalFundsBalance]);
+      fileContent = convertToCsv(["Classification", "Name", "Type / Restriction", "Current Balance (BDT)"], rows);
       break;
     }
     case ReportType.INCOME_EXPENSE: {
       const data = await getIncomeExpenseReport(mosqueId, params as any);
-      if (Array.isArray(data.data)) {
-        const rows = data.data.map((item: any) => [
-          item.month || item.fundName || "Total",
+      if (params.groupBy === "category" || (!params.groupBy && (data.incomeCategories || data.expenseCategories))) {
+        const rows: (string | number)[][] = [];
+        (data.incomeCategories || []).forEach((c: any) => {
+          rows.push(["Income", c.categoryName, c.formattedAmount, c.count]);
+        });
+        (data.expenseCategories || []).forEach((c: any) => {
+          rows.push(["Expense", c.categoryName, c.formattedAmount, c.count]);
+        });
+        rows.push(["Summary", "Total Income", data.formattedTotalIncome, ""]);
+        rows.push(["Summary", "Total Expense", data.formattedTotalExpense, ""]);
+        rows.push(["Summary", "Net Surplus / (Deficit)", data.formattedNetSurplus, ""]);
+        fileContent = convertToCsv(["Flow Type", "Category Name", "Amount (BDT)", "Transactions Count"], rows);
+      } else if (params.groupBy === "fund") {
+        const rows: (string | number)[][] = (data.data || []).map((item: any) => [
+          item.fundName || item.name || "Fund",
+          item.fundType || item.type || "GENERAL",
           item.formattedIncome,
           item.formattedExpense,
           item.formattedNet,
         ]);
-        fileContent = convertToCsv(["Period/Fund", "Income", "Expense", "Net"], rows);
+        rows.push(["Total", "", data.formattedTotalIncome, data.formattedTotalExpense, data.formattedNetSurplus]);
+        fileContent = convertToCsv(["Fund Name", "Fund Type", "Income (BDT)", "Expense (BDT)", "Net Allocation (BDT)"], rows);
       } else {
-        fileContent = `Total Income,${data.formattedTotalIncome}\nTotal Expense,${data.formattedTotalExpense}\nNet Surplus,${data.formattedNetSurplus}`;
+        const rows: (string | number)[][] = (data.data || []).map((item: any) => [
+          item.month || "Period",
+          item.formattedIncome,
+          item.formattedExpense,
+          item.formattedNet,
+        ]);
+        rows.push(["Total", data.formattedTotalIncome, data.formattedTotalExpense, data.formattedNetSurplus]);
+        fileContent = convertToCsv(["Accounting Period", "Income (BDT)", "Expense (BDT)", "Net Flow (BDT)"], rows);
       }
       break;
     }
     case ReportType.DONORS: {
       const data = await getDonorsReport(mosqueId, params as any);
-      const rows = (data.topDonors || []).map((d: any) => [
-        d.name,
+      const donorList = data.topDonors || data.donors || data.data || [];
+      const rows: (string | number)[][] = donorList.map((d: any, idx: number) => [
+        idx + 1,
+        d.name || d.donorName || "Congregant",
         d.phone || "",
-        d.formattedTotalGiven,
-        d.donationCount,
+        d.formattedTotalGiven || d.formattedTotalAmount || "",
+        d.donationCount || d.count || 1,
       ]);
-      fileContent = convertToCsv(["Donor Name", "Phone", "Total Given", "Donation Count"], rows);
+      rows.push(["Total", `${donorList.length} Donors`, "", data.formattedTotalGiving || "", data.totalDonationsCount || ""]);
+      fileContent = convertToCsv(["Rank", "Donor / Household", "Phone", "Total Contributed (BDT)", "Donation Count"], rows);
       break;
     }
     case ReportType.DASHBOARD:
     default: {
       const data = await getDashboardReport(mosqueId);
-      const rows = [
+      const rows: (string | number)[][] = [
         ["Total Accounts", data.balances.formattedTotalAccounts],
         ["Total Funds", data.balances.formattedTotalFunds],
         ["This Month Income", data.thisMonth.formattedIncome],

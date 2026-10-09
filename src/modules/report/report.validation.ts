@@ -168,6 +168,39 @@ export function validateAccountReconciliationInput(body: unknown): AccountReconc
   };
 }
 
+function parseStartDate(value: unknown): Date | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const str = String(value).trim();
+  const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(str) ? `${str}T00:00:00.000Z` : str;
+  const parsed = new Date(dateStr);
+  if (isNaN(parsed.getTime())) {
+    throw HttpError.badRequest("Invalid startDate parameter.", "INVALID_START_DATE");
+  }
+  return parsed;
+}
+
+function parseEndDate(value: unknown): Date | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const str = String(value).trim();
+  const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(str) ? `${str}T23:59:59.999Z` : str;
+  const parsed = new Date(dateStr);
+  if (isNaN(parsed.getTime())) {
+    throw HttpError.badRequest("Invalid endDate parameter.", "INVALID_END_DATE");
+  }
+  return parsed;
+}
+
+function parseAsOfDate(value: unknown): Date | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const str = String(value).trim();
+  const dateStr = /^\d{4}-\d{2}-\d{2}$/.test(str) ? `${str}T23:59:59.999Z` : str;
+  const parsed = new Date(dateStr);
+  if (isNaN(parsed.getTime())) {
+    throw HttpError.badRequest("Invalid asOf date parameter.", "INVALID_DATE");
+  }
+  return parsed;
+}
+
 /**
  * Validates GET /reports/balances query
  */
@@ -177,15 +210,7 @@ export function validateBalancesReportQueryInput(query: unknown): BalancesReport
   }
 
   const raw = query as Record<string, unknown>;
-  let asOf: Date | undefined;
-
-  if (raw["asOf"] !== undefined && raw["asOf"] !== null && raw["asOf"] !== "") {
-    const parsed = new Date(String(raw["asOf"]));
-    if (isNaN(parsed.getTime())) {
-      throw HttpError.badRequest("Invalid asOf date parameter.", "INVALID_DATE");
-    }
-    asOf = parsed;
-  }
+  const asOf = parseAsOfDate(raw["asOf"]);
 
   return { asOf };
 }
@@ -199,26 +224,10 @@ export function validateIncomeExpenseReportQueryInput(query: unknown): IncomeExp
   }
 
   const raw = query as Record<string, unknown>;
-  let startDate: Date | undefined;
-  let endDate: Date | undefined;
+  const startDate = parseStartDate(raw["startDate"]);
+  const endDate = parseEndDate(raw["endDate"]);
   let groupBy: "fund" | "category" | "month" = "month";
   let fundId: string | undefined;
-
-  if (raw["startDate"]) {
-    const parsed = new Date(String(raw["startDate"]));
-    if (isNaN(parsed.getTime())) {
-      throw HttpError.badRequest("Invalid startDate parameter.", "INVALID_START_DATE");
-    }
-    startDate = parsed;
-  }
-
-  if (raw["endDate"]) {
-    const parsed = new Date(String(raw["endDate"]));
-    if (isNaN(parsed.getTime())) {
-      throw HttpError.badRequest("Invalid endDate parameter.", "INVALID_END_DATE");
-    }
-    endDate = parsed;
-  }
 
   if (raw["groupBy"]) {
     const grp = String(raw["groupBy"]).toLowerCase().trim();
@@ -245,24 +254,8 @@ export function validateFundStatementQueryInput(query: unknown): FundStatementQu
   }
 
   const raw = query as Record<string, unknown>;
-  let startDate: Date | undefined;
-  let endDate: Date | undefined;
-
-  if (raw["startDate"]) {
-    const parsed = new Date(String(raw["startDate"]));
-    if (isNaN(parsed.getTime())) {
-      throw HttpError.badRequest("Invalid startDate parameter.", "INVALID_START_DATE");
-    }
-    startDate = parsed;
-  }
-
-  if (raw["endDate"]) {
-    const parsed = new Date(String(raw["endDate"]));
-    if (isNaN(parsed.getTime())) {
-      throw HttpError.badRequest("Invalid endDate parameter.", "INVALID_END_DATE");
-    }
-    endDate = parsed;
-  }
+  const startDate = parseStartDate(raw["startDate"]);
+  const endDate = parseEndDate(raw["endDate"]);
 
   return { startDate, endDate };
 }
@@ -276,26 +269,10 @@ export function validateAccountStatementQueryInput(query: unknown): AccountState
   }
 
   const raw = query as Record<string, unknown>;
-  let startDate: Date | undefined;
-  let endDate: Date | undefined;
+  const startDate = parseStartDate(raw["startDate"]);
+  const endDate = parseEndDate(raw["endDate"]);
   let limit = 100;
   let page = 1;
-
-  if (raw["startDate"]) {
-    const parsed = new Date(String(raw["startDate"]));
-    if (isNaN(parsed.getTime())) {
-      throw HttpError.badRequest("Invalid startDate parameter.", "INVALID_START_DATE");
-    }
-    startDate = parsed;
-  }
-
-  if (raw["endDate"]) {
-    const parsed = new Date(String(raw["endDate"]));
-    if (isNaN(parsed.getTime())) {
-      throw HttpError.badRequest("Invalid endDate parameter.", "INVALID_END_DATE");
-    }
-    endDate = parsed;
-  }
 
   if (raw["limit"] !== undefined) {
     const parsed = parseInt(String(raw["limit"]), 10);
@@ -323,27 +300,11 @@ export function validateDonorsReportQueryInput(query: unknown): DonorsReportQuer
   }
 
   const raw = query as Record<string, unknown>;
-  let startDate: Date | undefined;
-  let endDate: Date | undefined;
+  const startDate = parseStartDate(raw["startDate"]);
+  const endDate = parseEndDate(raw["endDate"]);
   let groupBy: "member" | "family" = "member";
   let status: "top" | "lapsed" | "all" = "all";
   let limit = 50;
-
-  if (raw["startDate"]) {
-    const parsed = new Date(String(raw["startDate"]));
-    if (isNaN(parsed.getTime())) {
-      throw HttpError.badRequest("Invalid startDate parameter.", "INVALID_START_DATE");
-    }
-    startDate = parsed;
-  }
-
-  if (raw["endDate"]) {
-    const parsed = new Date(String(raw["endDate"]));
-    if (isNaN(parsed.getTime())) {
-      throw HttpError.badRequest("Invalid endDate parameter.", "INVALID_END_DATE");
-    }
-    endDate = parsed;
-  }
 
   if (raw["groupBy"]) {
     const val = String(raw["groupBy"]).toLowerCase().trim();
