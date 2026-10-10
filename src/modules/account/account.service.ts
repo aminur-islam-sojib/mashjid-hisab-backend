@@ -30,6 +30,8 @@ export interface AccountResponseItem {
   isArchived: boolean;
   createdAt: Date;
   updatedAt: Date;
+  balance?: string;
+  currentBalance?: string;
 }
 
 /**
@@ -125,6 +127,8 @@ export async function createAccount(
       isArchived: account.isArchived,
       createdAt: account.createdAt,
       updatedAt: account.updatedAt,
+      balance: account.openingBalance.toString(),
+      currentBalance: account.openingBalance.toString(),
     };
   } catch (error) {
     if (
@@ -177,6 +181,8 @@ export async function getAccountById(
     throw HttpError.notFound("Account not found.", "ACCOUNT_NOT_FOUND");
   }
 
+  const balance = await getAccountBalance(account.id, account.openingBalance);
+
   return {
     id: account.id,
     mosqueId: account.mosqueId,
@@ -187,6 +193,8 @@ export async function getAccountById(
     isArchived: account.isArchived,
     createdAt: account.createdAt,
     updatedAt: account.updatedAt,
+    balance: balance.toString(),
+    currentBalance: balance.toString(),
   };
 }
 
@@ -259,7 +267,11 @@ export async function getMosqueAccounts(
     },
   });
 
-  return accounts.map((a) => ({
+  const balances = await Promise.all(
+    accounts.map((a) => getAccountBalance(a.id, a.openingBalance)),
+  );
+
+  return accounts.map((a, i) => ({
     id: a.id,
     mosqueId: a.mosqueId,
     name: a.name,
@@ -269,6 +281,8 @@ export async function getMosqueAccounts(
     isArchived: a.isArchived,
     createdAt: a.createdAt,
     updatedAt: a.updatedAt,
+    balance: (balances[i] ?? a.openingBalance).toString(),
+    currentBalance: (balances[i] ?? a.openingBalance).toString(),
   }));
 }
 
@@ -437,6 +451,11 @@ export async function updateAccount(
       },
     });
 
+    const balance = await getAccountBalance(
+      updatedAccount.id,
+      updatedAccount.openingBalance,
+    );
+
     return {
       id: updatedAccount.id,
       mosqueId: updatedAccount.mosqueId,
@@ -447,6 +466,8 @@ export async function updateAccount(
       isArchived: updatedAccount.isArchived,
       createdAt: updatedAccount.createdAt,
       updatedAt: updatedAccount.updatedAt,
+      balance: balance.toString(),
+      currentBalance: balance.toString(),
     };
   } catch (error) {
     if (
@@ -631,6 +652,8 @@ export async function archiveAccount(
     isArchived: archived.isArchived,
     createdAt: archived.createdAt,
     updatedAt: archived.updatedAt,
+    balance: "0",
+    currentBalance: "0",
   };
 }
 

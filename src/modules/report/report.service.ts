@@ -197,7 +197,9 @@ export async function getDashboardReport(mosqueId: string) {
         type: f.type,
         isRestricted: f.isRestricted,
         balance: balance.toString(),
+        currentBalance: balance.toString(),
         formattedBalance: formatPoishaToCurrency(balance),
+        formattedCurrentBalance: formatPoishaToCurrency(balance),
       };
     }),
   );

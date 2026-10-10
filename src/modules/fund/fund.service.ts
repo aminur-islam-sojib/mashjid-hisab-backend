@@ -32,6 +32,8 @@ export interface FundResponseItem {
   createdAt: Date;
   updatedAt: Date;
   categoryCount?: number;
+  balance?: string;
+  currentBalance?: string;
 }
 
 /**
@@ -102,7 +104,20 @@ export async function createFund(
     },
   });
 
-  return fund;
+  return {
+    id: fund.id,
+    mosqueId: fund.mosqueId,
+    name: fund.name,
+    type: fund.type,
+    isRestricted: fund.isRestricted,
+    description: fund.description,
+    isArchived: fund.isArchived,
+    createdAt: fund.createdAt,
+    updatedAt: fund.updatedAt,
+    categoryCount: 0,
+    balance: "0",
+    currentBalance: "0",
+  };
 }
 
 /**
@@ -172,7 +187,9 @@ export async function getMosqueFunds(
     },
   });
 
-  return funds.map((f) => ({
+  const balances = await Promise.all(funds.map((f) => getFundBalance(f.id)));
+
+  return funds.map((f, i) => ({
     id: f.id,
     mosqueId: f.mosqueId,
     name: f.name,
@@ -183,6 +200,8 @@ export async function getMosqueFunds(
     createdAt: f.createdAt,
     updatedAt: f.updatedAt,
     categoryCount: f._count.categories,
+    balance: (balances[i] ?? 0n).toString(),
+    currentBalance: (balances[i] ?? 0n).toString(),
   }));
 }
 
@@ -284,6 +303,8 @@ export async function getFundById(
     throw HttpError.notFound("Fund not found.", "FUND_NOT_FOUND");
   }
 
+  const balance = await getFundBalance(fund.id);
+
   return {
     id: fund.id,
     mosqueId: fund.mosqueId,
@@ -295,6 +316,8 @@ export async function getFundById(
     createdAt: fund.createdAt,
     updatedAt: fund.updatedAt,
     categoryCount: fund._count.categories,
+    balance: balance.toString(),
+    currentBalance: balance.toString(),
   };
 }
 
@@ -427,6 +450,8 @@ export async function updateFund(
       },
     });
 
+    const balance = await getFundBalance(updatedFund.id);
+
     return {
       id: updatedFund.id,
       mosqueId: updatedFund.mosqueId,
@@ -438,6 +463,8 @@ export async function updateFund(
       createdAt: updatedFund.createdAt,
       updatedAt: updatedFund.updatedAt,
       categoryCount: updatedFund._count.categories,
+      balance: balance.toString(),
+      currentBalance: balance.toString(),
     };
   } catch (error) {
     if (
@@ -607,6 +634,8 @@ export async function archiveFund(
     createdAt: archived.createdAt,
     updatedAt: archived.updatedAt,
     categoryCount: archived._count.categories,
+    balance: "0",
+    currentBalance: "0",
   };
 }
 
