@@ -253,7 +253,11 @@ export async function getTransactions(
 
     if (cursorWhere) andConditions.push(cursorWhere);
     if (query.status) {
-      if (Object.values(ExpenseStatus).includes(query.status as ExpenseStatus)) {
+      if (query.status === "PENDING") {
+        andConditions.push({
+          status: { in: [ExpenseStatus.PENDING, ExpenseStatus.PENDING_APPROVAL] },
+        });
+      } else if (Object.values(ExpenseStatus).includes(query.status as ExpenseStatus)) {
         andConditions.push({ status: query.status as ExpenseStatus });
       } else {
         return [];

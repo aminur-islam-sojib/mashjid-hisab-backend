@@ -229,7 +229,13 @@ export async function getDashboardReport(mosqueId: string) {
   const monthNet = monthIncome - monthExpense;
 
   // 3. Pending Approvals
-  const [pendingDonations, pendingExpenses, openCollections] = await Promise.all([
+  const [
+    pendingDonations,
+    pendingExpenses,
+    openCollections,
+    pendingDonationsSum,
+    pendingExpensesSum,
+  ] = await Promise.all([
     prisma.donation.count({
       where: { mosqueId, status: DonationStatus.PENDING },
     }),
@@ -242,7 +248,22 @@ export async function getDashboardReport(mosqueId: string) {
     prisma.collectionSession.count({
       where: { mosqueId, status: CollectionStatus.OPEN },
     }),
+    prisma.donation.aggregate({
+      where: { mosqueId, status: DonationStatus.PENDING },
+      _sum: { amount: true },
+    }),
+    prisma.expense.aggregate({
+      where: {
+        mosqueId,
+        status: { in: [ExpenseStatus.PENDING, ExpenseStatus.PENDING_APPROVAL] },
+      },
+      _sum: { amount: true },
+    }),
   ]);
+
+  const totalPendingAmount =
+    (pendingDonationsSum._sum.amount ?? 0n) +
+    (pendingExpensesSum._sum.amount ?? 0n);
 
   // 4. Dues Collection Rate (for current month)
   const currentMonthDues = await prisma.due.findMany({
@@ -294,6 +315,8 @@ export async function getDashboardReport(mosqueId: string) {
       pendingExpenses,
       openCollections,
       totalPending: pendingDonations + pendingExpenses + openCollections,
+      totalPendingAmount: totalPendingAmount.toString(),
+      formattedTotalPendingAmount: formatPoishaToCurrency(totalPendingAmount),
     },
     duesCollection: {
       period: currentPeriod,
