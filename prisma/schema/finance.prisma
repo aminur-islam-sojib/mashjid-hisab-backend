@@ -23,6 +23,9 @@ model Fund {
   // fund's Transactions may only use Categories explicitly linked to it.
   isRestricted Boolean  @default(false)
 
+  // Integer minor units (poisha), matching Account.openingBalance
+  openingBalance BigInt   @default(0)
+
   description  String?
   isArchived   Boolean  @default(false)
 

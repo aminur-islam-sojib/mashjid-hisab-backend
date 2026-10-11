@@ -11,6 +11,7 @@ import {
   validateGetMosqueFundsQuery,
   validateFundIdParam,
   validateUpdateFundInput,
+  validateAllocateUnallocatedInput,
 } from "./fund.validation.js";
 import {
   createFund,
@@ -18,6 +19,7 @@ import {
   getFundById,
   updateFund,
   archiveFund,
+  allocateUnallocated,
 } from "./fund.service.js";
 
 /**
@@ -124,6 +126,27 @@ export const archiveFundHandler = catchAsync(
       statusCode: 200,
       message: "Fund archived successfully.",
       data: fund,
+    });
+  },
+);
+
+/**
+ * POST /api/mosques/:mosqueId/funds/allocate-unallocated
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER
+ *
+ * Allocates unallocated mosque balance to a target fund's opening balance.
+ */
+export const allocateUnallocatedHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const input = validateAllocateUnallocatedInput(req.body);
+
+    const result = await allocateUnallocated(mosqueId, input);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Unallocated funds allocated successfully.",
+      data: result,
     });
   },
 );

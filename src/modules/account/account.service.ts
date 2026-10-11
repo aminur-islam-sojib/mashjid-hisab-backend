@@ -6,6 +6,7 @@ import { prisma } from "../../lib/prisma.js";
 import { HttpError } from "../../errors/HttpError.js";
 import {
   AccountType,
+  FundType,
   DonationStatus,
   ExpenseStatus,
   TransferLeg,
@@ -95,26 +96,89 @@ export async function createAccount(
     );
   }
 
+  // If opening balance > 0, determine which fund it should be credited to
+  let targetFundId: string | null = null;
+  if (input.openingBalance > 0n) {
+    if (input.openingFundId) {
+      const fund = await prisma.fund.findFirst({
+        where: {
+          id: input.openingFundId,
+          mosqueId: resolvedMosqueId,
+          isArchived: false,
+        },
+      });
+      if (!fund) {
+        throw HttpError.badRequest(
+          "Selected fund for opening balance allocation does not exist or is archived.",
+          "INVALID_OPENING_FUND",
+        );
+      }
+      targetFundId = fund.id;
+    } else {
+      // Find default GENERAL fund
+      let fund = await prisma.fund.findFirst({
+        where: {
+          mosqueId: resolvedMosqueId,
+          type: FundType.GENERAL,
+          isArchived: false,
+        },
+        orderBy: { createdAt: "asc" },
+      });
+      // Fallback to any active fund if no GENERAL fund
+      if (!fund) {
+        fund = await prisma.fund.findFirst({
+          where: {
+            mosqueId: resolvedMosqueId,
+            isArchived: false,
+          },
+          orderBy: { createdAt: "asc" },
+        });
+      }
+      if (!fund) {
+        throw HttpError.badRequest(
+          "Cannot create account with non-zero opening balance because no active fund exists to allocate it to. Please create a fund first.",
+          "NO_ACTIVE_FUND",
+        );
+      }
+      targetFundId = fund.id;
+    }
+  }
+
   try {
-    const account = await prisma.account.create({
-      data: {
-        mosqueId: resolvedMosqueId,
-        name: input.name,
-        type: input.type,
-        accountNumber: input.accountNumber ?? null,
-        openingBalance: input.openingBalance,
-      },
-      select: {
-        id: true,
-        mosqueId: true,
-        name: true,
-        type: true,
-        accountNumber: true,
-        openingBalance: true,
-        isArchived: true,
-        createdAt: true,
-        updatedAt: true,
-      },
+    const account = await prisma.$transaction(async (tx) => {
+      const created = await tx.account.create({
+        data: {
+          mosqueId: resolvedMosqueId,
+          name: input.name,
+          type: input.type,
+          accountNumber: input.accountNumber ?? null,
+          openingBalance: input.openingBalance,
+        },
+        select: {
+          id: true,
+          mosqueId: true,
+          name: true,
+          type: true,
+          accountNumber: true,
+          openingBalance: true,
+          isArchived: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
+
+      if (targetFundId && input.openingBalance > 0n) {
+        await tx.fund.update({
+          where: { id: targetFundId },
+          data: {
+            openingBalance: {
+              increment: input.openingBalance,
+            },
+          },
+        });
+      }
+
+      return created;
     });
 
     return {

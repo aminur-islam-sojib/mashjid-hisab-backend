@@ -10,6 +10,7 @@ export interface CreateAccountInput {
   type: AccountType;
   accountNumber?: string | null;
   openingBalance: bigint;
+  openingFundId?: string | null;
 }
 
 /**
@@ -156,6 +157,23 @@ export function validateCreateAccountInput(body: unknown): CreateAccountInput {
     }
   }
 
+  // -- openingFundId (optional) -----------------------------------------------
+  let openingFundId: string | null = null;
+  if (
+    raw["openingFundId"] !== undefined &&
+    raw["openingFundId"] !== null &&
+    raw["openingFundId"] !== ""
+  ) {
+    if (typeof raw["openingFundId"] !== "string") {
+      issues.push({
+        field: "openingFundId",
+        issue: "Opening fund identifier must be a string.",
+      });
+    } else {
+      openingFundId = raw["openingFundId"].trim();
+    }
+  }
+
   if (issues.length > 0) {
     throw HttpError.validationError(issues);
   }
@@ -165,6 +183,7 @@ export function validateCreateAccountInput(body: unknown): CreateAccountInput {
     type,
     accountNumber,
     openingBalance,
+    openingFundId,
   };
 }
 

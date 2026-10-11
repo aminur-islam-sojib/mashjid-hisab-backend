@@ -245,6 +245,12 @@ export async function getFundBalance(
   tx: Prisma.TransactionClient,
   fundId: string,
 ): Promise<bigint> {
+  const fund = await tx.fund.findUnique({
+    where: { id: fundId },
+    select: { openingBalance: true },
+  });
+  const fundOpening = fund?.openingBalance ?? 0n;
+
   const donations = await tx.donation.aggregate({
     where: {
       fundId,
@@ -292,6 +298,7 @@ export async function getFundBalance(
   });
 
   return (
+    fundOpening +
     (donations._sum.amount ?? 0n) -
     (expenses._sum.amount ?? 0n) +
     (transferInflows._sum.amount ?? 0n) -

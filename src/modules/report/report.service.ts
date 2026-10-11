@@ -68,7 +68,7 @@ export async function getDashboardReport(mosqueId: string) {
     }),
     prisma.fund.findMany({
       where: { mosqueId, isArchived: false },
-      select: { id: true, name: true, type: true, isRestricted: true },
+      select: { id: true, name: true, type: true, isRestricted: true, openingBalance: true },
     }),
   ]);
 
@@ -188,6 +188,7 @@ export async function getDashboardReport(mosqueId: string) {
       ]);
 
       const balance =
+        f.openingBalance +
         (donations._sum.amount ?? 0n) -
         (expenses._sum.amount ?? 0n) +
         (transferIn._sum.amount ?? 0n) -
@@ -297,6 +298,8 @@ export async function getDashboardReport(mosqueId: string) {
       formattedTotalAccounts: formatPoishaToCurrency(totalAccountsBalance),
       totalFunds: totalFundsBalance.toString(),
       formattedTotalFunds: formatPoishaToCurrency(totalFundsBalance),
+      unallocated: (totalAccountsBalance - totalFundsBalance).toString(),
+      formattedUnallocated: formatPoishaToCurrency(totalAccountsBalance - totalFundsBalance),
       accounts: accountsSummary,
       funds: fundsSummary,
     },
@@ -374,7 +377,7 @@ export async function getBalancesReport(mosqueId: string, query: BalancesReportQ
     }),
     prisma.fund.findMany({
       where: { mosqueId, isArchived: false },
-      select: { id: true, name: true, type: true, isRestricted: true },
+      select: { id: true, name: true, type: true, isRestricted: true, openingBalance: true },
       orderBy: { name: "asc" },
     }),
   ]);
@@ -508,6 +511,7 @@ export async function getBalancesReport(mosqueId: string, query: BalancesReportQ
       ]);
 
       const balance =
+        f.openingBalance +
         (donations._sum.amount ?? 0n) -
         (expenses._sum.amount ?? 0n) +
         (transferIn._sum.amount ?? 0n) -
@@ -528,6 +532,8 @@ export async function getBalancesReport(mosqueId: string, query: BalancesReportQ
     }),
   );
 
+  const unallocated = totalAccountsBalance - totalFundsBalance;
+
   return {
     asOf: cutoffDate,
     accounts: accountsBalances,
@@ -540,6 +546,8 @@ export async function getBalancesReport(mosqueId: string, query: BalancesReportQ
     totalFundBalance: totalFundsBalance.toString(),
     formattedTotalFundsBalance: formatPoishaToCurrency(totalFundsBalance),
     formattedTotalFundBalance: formatPoishaToCurrency(totalFundsBalance),
+    unallocated: unallocated.toString(),
+    formattedUnallocated: formatPoishaToCurrency(unallocated),
   };
 }
 
@@ -850,6 +858,7 @@ export async function getFundStatement(
   ]);
 
   const openingBalance =
+    fund.openingBalance +
     (priorDonations._sum.amount ?? 0n) -
     (priorExpenses._sum.amount ?? 0n) +
     (priorTransfersIn._sum.amount ?? 0n) -

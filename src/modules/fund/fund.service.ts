@@ -15,10 +15,12 @@ import {
   type PrismaClient,
 } from "../../../generated/prisma/client.js";
 import { resolveActiveMosqueId } from "../mosque/mosque.service.js";
+import { formatPoishaToCurrency } from "../account/account.service.js";
 import type {
   CreateFundInput,
   GetMosqueFundsQuery,
   UpdateFundInput,
+  AllocateUnallocatedInput,
 } from "./fund.validation.js";
 
 export interface FundResponseItem {
@@ -27,6 +29,7 @@ export interface FundResponseItem {
   name: string;
   type: FundType;
   isRestricted: boolean;
+  openingBalance?: string;
   description: string | null;
   isArchived: boolean;
   createdAt: Date;
@@ -101,6 +104,7 @@ export async function createFund(
       isArchived: true,
       createdAt: true,
       updatedAt: true,
+      openingBalance: true,
     },
   });
 
@@ -111,6 +115,7 @@ export async function createFund(
     type: fund.type,
     isRestricted: fund.isRestricted,
     description: fund.description,
+    openingBalance: fund.openingBalance.toString(),
     isArchived: fund.isArchived,
     createdAt: fund.createdAt,
     updatedAt: fund.updatedAt,
@@ -176,6 +181,7 @@ export async function getMosqueFunds(
       type: true,
       isRestricted: true,
       description: true,
+      openingBalance: true,
       isArchived: true,
       createdAt: true,
       updatedAt: true,
@@ -187,7 +193,7 @@ export async function getMosqueFunds(
     },
   });
 
-  const balances = await Promise.all(funds.map((f) => getFundBalance(f.id)));
+  const balances = await Promise.all(funds.map((f) => getFundBalance(f.id, prisma, f.openingBalance)));
 
   return funds.map((f, i) => ({
     id: f.id,
@@ -196,6 +202,7 @@ export async function getMosqueFunds(
     type: f.type,
     isRestricted: f.isRestricted,
     description: f.description,
+    openingBalance: f.openingBalance.toString(),
     isArchived: f.isArchived,
     createdAt: f.createdAt,
     updatedAt: f.updatedAt,
@@ -288,6 +295,7 @@ export async function getFundById(
       type: true,
       isRestricted: true,
       description: true,
+      openingBalance: true,
       isArchived: true,
       createdAt: true,
       updatedAt: true,
@@ -303,7 +311,7 @@ export async function getFundById(
     throw HttpError.notFound("Fund not found.", "FUND_NOT_FOUND");
   }
 
-  const balance = await getFundBalance(fund.id);
+  const balance = await getFundBalance(fund.id, prisma, fund.openingBalance);
 
   return {
     id: fund.id,
@@ -312,6 +320,7 @@ export async function getFundById(
     type: fund.type,
     isRestricted: fund.isRestricted,
     description: fund.description,
+    openingBalance: fund.openingBalance.toString(),
     isArchived: fund.isArchived,
     createdAt: fund.createdAt,
     updatedAt: fund.updatedAt,
@@ -439,6 +448,7 @@ export async function updateFund(
         type: true,
         isRestricted: true,
         description: true,
+        openingBalance: true,
         isArchived: true,
         createdAt: true,
         updatedAt: true,
@@ -450,7 +460,7 @@ export async function updateFund(
       },
     });
 
-    const balance = await getFundBalance(updatedFund.id);
+    const balance = await getFundBalance(updatedFund.id, prisma, updatedFund.openingBalance);
 
     return {
       id: updatedFund.id,
@@ -459,6 +469,7 @@ export async function updateFund(
       type: updatedFund.type,
       isRestricted: updatedFund.isRestricted,
       description: updatedFund.description,
+      openingBalance: updatedFund.openingBalance.toString(),
       isArchived: updatedFund.isArchived,
       createdAt: updatedFund.createdAt,
       updatedAt: updatedFund.updatedAt,
@@ -494,8 +505,18 @@ export async function updateFund(
 export async function getFundBalance(
   fundId: string,
   client: Prisma.TransactionClient | PrismaClient = prisma,
+  openingBalance?: bigint,
 ): Promise<bigint> {
   try {
+    let fundOpening = openingBalance;
+    if (fundOpening === undefined) {
+      const fund = await client.fund.findUnique({
+        where: { id: fundId },
+        select: { openingBalance: true },
+      });
+      fundOpening = fund?.openingBalance ?? 0n;
+    }
+
     const [donations, expenses, transferInflows, transferOutflows] = await Promise.all([
       client.donation.aggregate({
         where: {
@@ -542,6 +563,7 @@ export async function getFundBalance(
     ]);
 
     return (
+      fundOpening +
       (donations._sum.amount ?? 0n) -
       (expenses._sum.amount ?? 0n) +
       (transferInflows._sum.amount ?? 0n) -
@@ -550,6 +572,111 @@ export async function getFundBalance(
   } catch {
     return 0n;
   }
+}
+
+/**
+ * Allocates unallocated mosque balance to a specific fund by incrementing its openingBalance.
+ * Enforces that:
+ * 1. Mosque exists and is active.
+ * 2. Target fund exists and is active in this mosque.
+ * 3. Amount > 0.
+ * 4. Sum(Account.openingBalance) - Sum(Fund.openingBalance) >= amount.
+ */
+export async function allocateUnallocated(
+  mosqueId: string,
+  input: AllocateUnallocatedInput,
+): Promise<{ fund: FundResponseItem; unallocatedRemaining: string; formattedUnallocatedRemaining: string }> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  const fund = await prisma.fund.findFirst({
+    where: { id: input.fundId, mosqueId: resolvedMosqueId },
+    select: {
+      id: true,
+      name: true,
+      isArchived: true,
+      openingBalance: true,
+    },
+  });
+
+  if (!fund) {
+    throw HttpError.notFound("Fund not found.", "FUND_NOT_FOUND");
+  }
+  if (fund.isArchived) {
+    throw HttpError.badRequest("Cannot allocate balance to an archived fund.", "FUND_ARCHIVED");
+  }
+
+  const [accountOpeningAgg, fundOpeningAgg] = await Promise.all([
+    prisma.account.aggregate({
+      where: { mosqueId: resolvedMosqueId },
+      _sum: { openingBalance: true },
+    }),
+    prisma.fund.aggregate({
+      where: { mosqueId: resolvedMosqueId },
+      _sum: { openingBalance: true },
+    }),
+  ]);
+
+  const totalAccountOpening = accountOpeningAgg._sum.openingBalance ?? 0n;
+  const totalFundOpening = fundOpeningAgg._sum.openingBalance ?? 0n;
+  const currentUnallocated = totalAccountOpening - totalFundOpening;
+
+  if (currentUnallocated <= 0n) {
+    throw HttpError.badRequest("There is no unallocated balance to allocate.", "NO_UNALLOCATED_BALANCE");
+  }
+
+  if (input.amount > currentUnallocated) {
+    throw HttpError.badRequest(
+      `Allocation amount (${formatPoishaToCurrency(input.amount)}) exceeds available unallocated balance (${formatPoishaToCurrency(currentUnallocated)}).`,
+      "AMOUNT_EXCEEDS_UNALLOCATED",
+    );
+  }
+
+  const updatedFund = await prisma.fund.update({
+    where: { id: fund.id },
+    data: {
+      openingBalance: { increment: input.amount },
+    },
+    select: {
+      id: true,
+      mosqueId: true,
+      name: true,
+      type: true,
+      isRestricted: true,
+      description: true,
+      openingBalance: true,
+      isArchived: true,
+      createdAt: true,
+      updatedAt: true,
+      _count: {
+        select: {
+          categories: true,
+        },
+      },
+    },
+  });
+
+  const newBalance = await getFundBalance(updatedFund.id, prisma, updatedFund.openingBalance);
+  const remaining = currentUnallocated - input.amount;
+
+  return {
+    fund: {
+      id: updatedFund.id,
+      mosqueId: updatedFund.mosqueId,
+      name: updatedFund.name,
+      type: updatedFund.type,
+      isRestricted: updatedFund.isRestricted,
+      description: updatedFund.description,
+      openingBalance: updatedFund.openingBalance.toString(),
+      isArchived: updatedFund.isArchived,
+      createdAt: updatedFund.createdAt,
+      updatedAt: updatedFund.updatedAt,
+      categoryCount: updatedFund._count.categories,
+      balance: newBalance.toString(),
+      currentBalance: newBalance.toString(),
+    },
+    unallocatedRemaining: remaining.toString(),
+    formattedUnallocatedRemaining: formatPoishaToCurrency(remaining),
+  };
 }
 
 /**

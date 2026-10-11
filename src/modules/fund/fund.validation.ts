@@ -342,3 +342,74 @@ export function validateUpdateFundInput(body: unknown): UpdateFundInput {
 
   return input;
 }
+
+export interface AllocateUnallocatedInput {
+  fundId: string;
+  amount: bigint;
+}
+
+/**
+ * Validates request payload for POST /api/mosques/:mosqueId/funds/allocate-unallocated
+ */
+export function validateAllocateUnallocatedInput(body: unknown): AllocateUnallocatedInput {
+  if (!body || typeof body !== "object") {
+    throw HttpError.badRequest("Request body must be a JSON object.");
+  }
+
+  const raw = body as Record<string, unknown>;
+  const issues: ValidationIssue[] = [];
+
+  let fundId = "";
+  if (!raw["fundId"] || typeof raw["fundId"] !== "string" || !raw["fundId"].trim()) {
+    issues.push({ field: "fundId", issue: "Fund identifier is required." });
+  } else {
+    fundId = raw["fundId"].trim();
+  }
+
+  let amount = 0n;
+  if (raw["amount"] === undefined || raw["amount"] === null || raw["amount"] === "") {
+    issues.push({ field: "amount", issue: "Amount is required." });
+  } else {
+    const rawAmt = raw["amount"];
+    if (typeof rawAmt === "bigint") {
+      if (rawAmt <= 0n) {
+        issues.push({ field: "amount", issue: "Amount must be greater than zero." });
+      } else {
+        amount = rawAmt;
+      }
+    } else if (typeof rawAmt === "number") {
+      if (!Number.isFinite(rawAmt) || !Number.isInteger(rawAmt) || rawAmt <= 0) {
+        issues.push({
+          field: "amount",
+          issue: "Amount must be a positive integer in minor units (poisha).",
+        });
+      } else {
+        amount = BigInt(rawAmt);
+      }
+    } else if (typeof rawAmt === "string") {
+      const trimmed = rawAmt.trim();
+      if (!/^\d+$/.test(trimmed) || BigInt(trimmed) <= 0n) {
+        issues.push({
+          field: "amount",
+          issue: "Amount must be a positive integer in minor units (poisha).",
+        });
+      } else {
+        amount = BigInt(trimmed);
+      }
+    } else {
+      issues.push({
+        field: "amount",
+        issue: "Amount must be an integer number or string in minor units (poisha).",
+      });
+    }
+  }
+
+  if (issues.length > 0) {
+    throw HttpError.validationError(issues);
+  }
+
+  return {
+    fundId,
+    amount,
+  };
+}

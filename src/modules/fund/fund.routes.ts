@@ -15,9 +15,23 @@ import {
   getFundByIdHandler,
   updateFundHandler,
   archiveFundHandler,
+  allocateUnallocatedHandler,
 } from "./fund.controller.js";
 
 const fundRouter: Router = Router({ mergeParams: true });
+
+/**
+ * POST /api/mosques/:mosqueId/funds/allocate-unallocated
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER
+ *
+ * Allocates unallocated mosque balance to a target fund's opening balance.
+ */
+fundRouter.post(
+  "/allocate-unallocated",
+  authenticate,
+  requireMosqueMembership(Role.MOSQUE_ADMIN, Role.TREASURER),
+  allocateUnallocatedHandler,
+);
 
 /**
  * POST /api/mosques/:mosqueId/funds

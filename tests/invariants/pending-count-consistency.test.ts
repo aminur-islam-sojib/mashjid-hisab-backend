@@ -90,7 +90,7 @@ describe("Invariant Suite: Pending Count Consistency (T01)", () => {
     assert.equal(initialReport.pendingApprovals.totalPending, 0);
     assert.equal(initialReport.pendingApprovals.countingSessionsToVerify, 0);
 
-    const initialQueue = await getPendingTransactions(fixture.mosqueId, {}, fixture.adminActor);
+    const initialQueue = await getPendingTransactions(fixture.mosqueId, { limit: 50 }, fixture.adminActor);
     assert.equal(initialQueue.items.length, 0);
     assert.equal(initialQueue.totalPending, 0);
 
@@ -120,6 +120,7 @@ describe("Invariant Suite: Pending Count Consistency (T01)", () => {
         categoryId: fixture.unrestrictedExpenseCategory.id,
         date: new Date(),
         payee: "Hardware Store",
+        attachments: [],
       },
       staffActor,
     );
@@ -153,7 +154,7 @@ describe("Invariant Suite: Pending Count Consistency (T01)", () => {
     );
 
     // 6. Fetch pending transactions queue
-    const pendingQueue = await getPendingTransactions(fixture.mosqueId, {}, fixture.adminActor);
+    const pendingQueue = await getPendingTransactions(fixture.mosqueId, { limit: 50 }, fixture.adminActor);
 
     // KEY INVARIANT: queue length must be exactly 2
     assert.equal(pendingQueue.items.length, 2, "Pending queue must return exactly 2 items");
