@@ -18,6 +18,7 @@ import {
   archiveAccountHandler,
 } from "./account.controller.js";
 import { reconcileAccountHandler } from "../report/report.controller.js";
+import { idempotency } from "../../middlewares/idempotency.middleware.js";
 
 const accountRouter: Router = Router({ mergeParams: true });
 
@@ -32,6 +33,7 @@ accountRouter.post(
   "/",
   authenticate,
   requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
+  idempotency(),
   createAccountHandler,
 );
 
@@ -101,6 +103,7 @@ accountRouter.post(
   "/:accountId/reconciliations",
   authenticate,
   requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
+  idempotency(),
   reconcileAccountHandler,
 );
 

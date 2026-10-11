@@ -16,6 +16,7 @@ import {
   getCollectionsHandler,
   getCollectionByIdHandler,
 } from "./collection.controller.js";
+import { idempotency } from "../../middlewares/idempotency.middleware.js";
 
 const collectionRouter: Router = Router({ mergeParams: true });
 
@@ -28,6 +29,7 @@ collectionRouter.post(
   "/",
   authenticate,
   requireMosqueMembership(...COLLECTION_OPERATOR_ROLES),
+  idempotency(),
   createCollectionSessionHandler,
 );
 
@@ -40,6 +42,7 @@ collectionRouter.post(
   "/:id/verify",
   authenticate,
   requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
+  idempotency(),
   verifyCollectionSessionHandler,
 );
 

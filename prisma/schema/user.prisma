@@ -76,6 +76,7 @@ model User {
   requestedExports        ReportExport[]          @relation("ReportExporter")
   uploadedAttachments     Attachment[]            @relation("AttachmentUploader")
   performedAudits         AuditLog[]              @relation("AuditActor")
+  idempotencyKeys         IdempotencyKey[]
 
   @@map("users")
 }

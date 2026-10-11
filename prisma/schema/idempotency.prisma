@@ -1,0 +1,37 @@
+// =============================================================================
+// idempotency.prisma — Financial Mutation Idempotency & Deduplication
+//
+// Design notes:
+//  • Protects against double-submits, browser retries, and network reconnection dups.
+//  • Unique constraint on (mosqueId, userId, key) ensures proper tenancy & user scoping.
+//  • 24-hour TTL (expiresAt) automatically limits table bloat.
+// =============================================================================
+
+model IdempotencyKey {
+  id            String            @id @default(cuid())
+  mosqueId      String
+  mosque        Mosque            @relation(fields: [mosqueId], references: [id], onDelete: Cascade)
+
+  userId        String
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  key           String            // Client-supplied Idempotency-Key header (UUID or string)
+  requestPath   String            // URL path (e.g. /api/mosques/cuid/donations)
+  requestMethod String            // HTTP method (POST, etc.)
+  requestHash   String            // SHA-256 of canonicalized request payload
+
+  status        IdempotencyStatus @default(PROCESSING)
+  statusCode    Int?              // HTTP status code of the cached response
+  responseBody  Json?             // Cached JSON response body
+
+  expiresAt     DateTime          // 24-hour TTL
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  @@unique([mosqueId, userId, key])
+  @@index([mosqueId])
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}
+

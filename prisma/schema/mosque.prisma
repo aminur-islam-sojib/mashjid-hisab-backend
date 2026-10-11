@@ -66,6 +66,7 @@ model Mosque {
   reportExports          ReportExport[]
   attachments            Attachment[]
   auditLogs              AuditLog[]
+  idempotencyKeys        IdempotencyKey[]
 
   @@map("mosques")
 }

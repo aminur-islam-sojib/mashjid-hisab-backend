@@ -16,6 +16,7 @@ import {
   approveTransactionHandler,
   rejectTransactionHandler,
 } from "./transaction.controller.js";
+import { idempotency } from "../../middlewares/idempotency.middleware.js";
 
 const transactionRouter: Router = Router({ mergeParams: true });
 
@@ -70,6 +71,7 @@ transactionRouter.post(
   "/:id/approve",
   authenticate,
   requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
+  idempotency(),
   approveTransactionHandler,
 );
 
@@ -83,6 +85,7 @@ transactionRouter.post(
   "/:id/reject",
   authenticate,
   requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
+  idempotency(),
   rejectTransactionHandler,
 );
 

@@ -17,6 +17,7 @@ import {
   archiveFundHandler,
   allocateUnallocatedHandler,
 } from "./fund.controller.js";
+import { idempotency } from "../../middlewares/idempotency.middleware.js";
 
 const fundRouter: Router = Router({ mergeParams: true });
 
@@ -30,6 +31,7 @@ fundRouter.post(
   "/allocate-unallocated",
   authenticate,
   requireMosqueMembership(Role.MOSQUE_ADMIN, Role.TREASURER),
+  idempotency(),
   allocateUnallocatedHandler,
 );
 
@@ -44,6 +46,7 @@ fundRouter.post(
   "/",
   authenticate,
   requireMosqueMembership(Role.MOSQUE_ADMIN),
+  idempotency(),
   createFundHandler,
 );
 

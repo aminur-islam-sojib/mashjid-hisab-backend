@@ -18,6 +18,7 @@ import {
   updateExpenseHandler,
   voidExpenseHandler,
 } from "./expense.controller.js";
+import { idempotency } from "../../middlewares/idempotency.middleware.js";
 
 const expenseRouter: Router = Router({ mergeParams: true });
 
@@ -32,6 +33,7 @@ expenseRouter.post(
   "/",
   authenticate,
   requireMosqueMembership(...EXPENSE_OPERATOR_ROLES),
+  idempotency(),
   createExpenseHandler,
 );
 
@@ -85,6 +87,7 @@ expenseRouter.post(
   "/:id/void",
   authenticate,
   requireMosqueMembership(...ADMIN_ONLY_ROLES),
+  idempotency(),
   voidExpenseHandler,
 );
 

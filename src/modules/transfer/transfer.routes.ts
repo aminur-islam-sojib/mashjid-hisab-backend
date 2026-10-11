@@ -16,6 +16,7 @@ import {
   getTransferByIdHandler,
   voidTransferHandler,
 } from "./transfer.controller.js";
+import { idempotency } from "../../middlewares/idempotency.middleware.js";
 
 const transferRouter: Router = Router({ mergeParams: true });
 
@@ -31,6 +32,7 @@ transferRouter.post(
   "/",
   authenticate,
   requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
+  idempotency(),
   createTransferHandler,
 );
 
@@ -70,6 +72,7 @@ transferRouter.post(
   "/:id/void",
   authenticate,
   requireMosqueMembership(...ADMIN_ONLY_ROLES),
+  idempotency(),
   voidTransferHandler,
 );
 

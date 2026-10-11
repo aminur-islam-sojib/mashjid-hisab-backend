@@ -26,6 +26,7 @@ import {
   recordDuePaymentHandler,
   waiveDueHandler,
 } from "./chanda.controller.js";
+import { idempotency } from "../../middlewares/idempotency.middleware.js";
 
 // =============================================================================
 // 1. Chanda Plans Router
@@ -43,6 +44,7 @@ chandaPlanRouter.post(
   "/",
   authenticate,
   requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
+  idempotency(),
   createChandaPlanHandler,
 );
 
@@ -182,6 +184,7 @@ dueRouter.post(
   "/:id/payments",
   authenticate,
   requireMosqueMembership(...COLLECTION_OPERATOR_ROLES),
+  idempotency(),
   recordDuePaymentHandler,
 );
 

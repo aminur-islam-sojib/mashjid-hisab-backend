@@ -284,3 +284,13 @@ enum AuditEntity {
   COLLECTION
   ACCOUNT
 }
+
+// ---------------------------------------------------------------------------
+// IdempotencyStatus
+// Lifecycle state of an idempotent request record.
+// ---------------------------------------------------------------------------
+enum IdempotencyStatus {
+  PROCESSING
+  RESOLVED
+  FAILED
+}

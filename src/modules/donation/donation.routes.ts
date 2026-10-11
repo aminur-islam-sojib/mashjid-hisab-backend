@@ -18,6 +18,7 @@ import {
   voidDonationHandler,
   updateDonationHandler,
 } from "./donation.controller.js";
+import { idempotency } from "../../middlewares/idempotency.middleware.js";
 
 const donationRouter: Router = Router({ mergeParams: true });
 
@@ -31,6 +32,7 @@ donationRouter.post(
   "/",
   authenticate,
   requireMosqueMembership(...COLLECTION_OPERATOR_ROLES),
+  idempotency(),
   createDonationHandler,
 );
 
@@ -98,6 +100,7 @@ donationRouter.post(
   "/:donationId/void",
   authenticate,
   requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
+  idempotency(),
   voidDonationHandler,
 );
 
