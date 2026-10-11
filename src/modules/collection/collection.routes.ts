@@ -9,6 +9,7 @@ import {
   OVERSIGHT_ROLES,
   FINANCIAL_OPERATOR_ROLES,
   COLLECTION_OPERATOR_ROLES,
+  OPERATIONAL_ROLES,
 } from "../../middlewares/mosque.middleware.js";
 import {
   createCollectionSessionHandler,
@@ -48,25 +49,25 @@ collectionRouter.post(
 
 /**
  * GET /api/mosques/:mosqueId/collections and GET /api/collections
- * Access: ADMIN, TREAS, COMM
+ * Access: ADMIN, TREAS, COMM, STAFF
  * History of counts with who counted and who verified.
  */
 collectionRouter.get(
   "/",
   authenticate,
-  requireMosqueMembership(...OVERSIGHT_ROLES),
+  requireMosqueMembership(...OPERATIONAL_ROLES),
   getCollectionsHandler,
 );
 
 /**
  * GET /api/mosques/:mosqueId/collections/:id and GET /api/collections/:id
- * Access: ADMIN, TREAS, COMM
+ * Access: ADMIN, TREAS, COMM, STAFF
  * Single collection session detail.
  */
 collectionRouter.get(
   "/:id",
   authenticate,
-  requireMosqueMembership(...OVERSIGHT_ROLES),
+  requireMosqueMembership(...OPERATIONAL_ROLES),
   getCollectionByIdHandler,
 );
 
