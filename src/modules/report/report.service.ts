@@ -23,6 +23,10 @@ import {
 } from "../../../generated/prisma/client.js";
 import { isDateInClosedPeriod } from "../donation/donation.service.js";
 import { recordAuditLog } from "../audit/audit.service.js";
+import {
+  getPendingDonationWhere,
+  getPendingExpenseWhere,
+} from "../transaction/transaction.service.js";
 import type {
   BalancesReportQueryInput,
   IncomeExpenseReportQueryInput,
@@ -229,6 +233,9 @@ export async function getDashboardReport(mosqueId: string) {
   const monthNet = monthIncome - monthExpense;
 
   // 3. Pending Approvals
+  const pendingDonationWhere = getPendingDonationWhere(mosqueId);
+  const pendingExpenseWhere = getPendingExpenseWhere(mosqueId);
+
   const [
     pendingDonations,
     pendingExpenses,
@@ -237,26 +244,20 @@ export async function getDashboardReport(mosqueId: string) {
     pendingExpensesSum,
   ] = await Promise.all([
     prisma.donation.count({
-      where: { mosqueId, status: DonationStatus.PENDING },
+      where: pendingDonationWhere,
     }),
     prisma.expense.count({
-      where: {
-        mosqueId,
-        status: { in: [ExpenseStatus.PENDING, ExpenseStatus.PENDING_APPROVAL] },
-      },
+      where: pendingExpenseWhere,
     }),
     prisma.collectionSession.count({
       where: { mosqueId, status: CollectionStatus.OPEN },
     }),
     prisma.donation.aggregate({
-      where: { mosqueId, status: DonationStatus.PENDING },
+      where: pendingDonationWhere,
       _sum: { amount: true },
     }),
     prisma.expense.aggregate({
-      where: {
-        mosqueId,
-        status: { in: [ExpenseStatus.PENDING, ExpenseStatus.PENDING_APPROVAL] },
-      },
+      where: pendingExpenseWhere,
       _sum: { amount: true },
     }),
   ]);
@@ -314,7 +315,8 @@ export async function getDashboardReport(mosqueId: string) {
       pendingDonations,
       pendingExpenses,
       openCollections,
-      totalPending: pendingDonations + pendingExpenses + openCollections,
+      countingSessionsToVerify: openCollections,
+      totalPending: pendingDonations + pendingExpenses,
       totalPendingAmount: totalPendingAmount.toString(),
       formattedTotalPendingAmount: formatPoishaToCurrency(totalPendingAmount),
     },

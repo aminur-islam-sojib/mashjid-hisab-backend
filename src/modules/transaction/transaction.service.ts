@@ -828,6 +828,66 @@ export interface PendingQueueResult {
 }
 
 /**
+ * Shared where-clause builder for pending donations.
+ * Single source of truth for /transactions/pending and /reports/dashboard.
+ */
+export function getPendingDonationWhere(
+  mosqueId: string,
+  search?: string,
+): Prisma.DonationWhereInput {
+  const andConditions: Prisma.DonationWhereInput[] = [
+    { mosqueId },
+    { status: DonationStatus.PENDING },
+    { reversalOfId: null },
+  ];
+
+  if (search && search.trim()) {
+    const s = search.trim();
+    andConditions.push({
+      OR: [
+        { donorName: { contains: s, mode: "insensitive" } },
+        { donorPhone: { contains: s, mode: "insensitive" } },
+        { donorEmail: { contains: s, mode: "insensitive" } },
+        { notes: { contains: s, mode: "insensitive" } },
+      ],
+    });
+  }
+
+  return { AND: andConditions };
+}
+
+/**
+ * Shared where-clause builder for pending expenses.
+ * Single source of truth for /transactions/pending and /reports/dashboard.
+ */
+export function getPendingExpenseWhere(
+  mosqueId: string,
+  search?: string,
+): Prisma.ExpenseWhereInput {
+  const andConditions: Prisma.ExpenseWhereInput[] = [
+    { mosqueId },
+    {
+      status: {
+        in: [ExpenseStatus.PENDING, ExpenseStatus.PENDING_APPROVAL],
+      },
+    },
+    { reversalOfId: null },
+  ];
+
+  if (search && search.trim()) {
+    const s = search.trim();
+    andConditions.push({
+      OR: [
+        { payee: { contains: s, mode: "insensitive" } },
+        { notes: { contains: s, mode: "insensitive" } },
+      ],
+    });
+  }
+
+  return { AND: andConditions };
+}
+
+/**
  * GET /api/transactions/pending
  * The approval queue: STAFF entries and over-limit expenses.
  */
@@ -858,26 +918,10 @@ export async function getPendingTransactions(
   const fetchDonations = (async (): Promise<UnifiedTransactionItem[]> => {
     if (!shouldFetchDonations) return [];
 
-    const andConditions: Prisma.DonationWhereInput[] = [
-      { mosqueId: resolvedMosqueId },
-      { status: DonationStatus.PENDING },
-      { reversalOfId: null },
-    ];
-
-    if (query.search) {
-      const s = query.search.trim();
-      andConditions.push({
-        OR: [
-          { donorName: { contains: s, mode: "insensitive" } },
-          { donorPhone: { contains: s, mode: "insensitive" } },
-          { donorEmail: { contains: s, mode: "insensitive" } },
-          { notes: { contains: s, mode: "insensitive" } },
-        ],
-      });
-    }
+    const where = getPendingDonationWhere(resolvedMosqueId, query.search);
 
     const rows = await prisma.donation.findMany({
-      where: { AND: andConditions },
+      where,
       include: {
         account: { select: { id: true, name: true } },
         fund: { select: { id: true, name: true } },
@@ -916,28 +960,10 @@ export async function getPendingTransactions(
   const fetchExpenses = (async (): Promise<UnifiedTransactionItem[]> => {
     if (!shouldFetchExpenses) return [];
 
-    const andConditions: Prisma.ExpenseWhereInput[] = [
-      { mosqueId: resolvedMosqueId },
-      {
-        status: {
-          in: [ExpenseStatus.PENDING, ExpenseStatus.PENDING_APPROVAL],
-        },
-      },
-      { reversalOfId: null },
-    ];
-
-    if (query.search) {
-      const s = query.search.trim();
-      andConditions.push({
-        OR: [
-          { payee: { contains: s, mode: "insensitive" } },
-          { notes: { contains: s, mode: "insensitive" } },
-        ],
-      });
-    }
+    const where = getPendingExpenseWhere(resolvedMosqueId, query.search);
 
     const rows = await prisma.expense.findMany({
-      where: { AND: andConditions },
+      where,
       include: {
         account: { select: { id: true, name: true } },
         fund: { select: { id: true, name: true } },
