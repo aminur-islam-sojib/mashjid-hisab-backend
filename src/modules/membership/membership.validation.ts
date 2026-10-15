@@ -50,13 +50,15 @@ export function validateGetMosqueMembersQuery(query: unknown): GetMosqueMembersQ
       throw HttpError.badRequest("Status filter must be a string.", "INVALID_STATUS");
     }
     const statusUpper = raw["status"].trim().toUpperCase();
-    if (!Object.values(MembershipStatus).includes(statusUpper as MembershipStatus)) {
+    const normalizedStatus =
+      statusUpper === "INACTIVE" ? MembershipStatus.SUSPENDED : statusUpper;
+    if (!Object.values(MembershipStatus).includes(normalizedStatus as MembershipStatus)) {
       throw HttpError.badRequest(
         `Invalid status '${raw["status"]}'. Allowed statuses: ${Object.values(MembershipStatus).join(", ")}.`,
         "INVALID_STATUS",
       );
     }
-    result.status = statusUpper as MembershipStatus;
+    result.status = normalizedStatus as MembershipStatus;
   }
 
   if (raw["search"] !== undefined && raw["search"] !== null && raw["search"] !== "") {
@@ -139,13 +141,15 @@ export function validateUpdateMembershipInput(body: unknown): UpdateMembershipIn
       issues.push({ field: "status", issue: "Status cannot be empty." });
     } else {
       const statusUpper = raw["status"].trim().toUpperCase();
-      if (!Object.values(MembershipStatus).includes(statusUpper as MembershipStatus)) {
+      const normalizedStatus =
+        statusUpper === "INACTIVE" ? MembershipStatus.SUSPENDED : statusUpper;
+      if (!Object.values(MembershipStatus).includes(normalizedStatus as MembershipStatus)) {
         issues.push({
           field: "status",
           issue: `Invalid status '${raw["status"]}'. Allowed statuses: ${Object.values(MembershipStatus).join(", ")}.`,
         });
       } else {
-        input.status = statusUpper as MembershipStatus;
+        input.status = normalizedStatus as MembershipStatus;
       }
     }
   }
