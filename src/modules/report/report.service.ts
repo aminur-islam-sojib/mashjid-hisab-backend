@@ -20,6 +20,8 @@ import {
   ExportStatus,
   AuditAction,
   AuditEntity,
+  CampaignStatus,
+  MembershipStatus,
 } from "../../../generated/prisma/client.js";
 import { isDateInClosedPeriod } from "../donation/donation.service.js";
 import { recordAuditLog } from "../audit/audit.service.js";
@@ -290,9 +292,220 @@ export async function getDashboardReport(mosqueId: string) {
       ? Number((duesCollected * 10000n) / duesExpected) / 100
       : 0;
 
+  // 5. Last Month Income & Income Trend
+  const startOfLastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1, 0, 0, 0, 0));
+  const endOfLastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0, 23, 59, 59, 999));
+  const lastMonthIncomeAgg = await prisma.donation.aggregate({
+    where: {
+      mosqueId,
+      status: DonationStatus.POSTED,
+      date: { gte: startOfLastMonth, lte: endOfLastMonth },
+    },
+    _sum: { amount: true },
+  });
+  const lastMonthIncome = lastMonthIncomeAgg._sum.amount ?? 0n;
+  const incomeTrendPercentage = lastMonthIncome > 0n
+    ? Number(((monthIncome - lastMonthIncome) * 10000n) / lastMonthIncome) / 100
+    : (monthIncome > 0n ? 100 : 0);
+
+  // 6. Members & Trend
+  const [totalMembers, membersBeforeThisMonth, recentMembersRaw] = await Promise.all([
+    prisma.membership.count({
+      where: { mosqueId, status: { not: MembershipStatus.SUSPENDED } },
+    }),
+    prisma.membership.count({
+      where: {
+        mosqueId,
+        status: { not: MembershipStatus.SUSPENDED },
+        createdAt: { lt: startOfMonth },
+      },
+    }),
+    prisma.membership.findMany({
+      where: { mosqueId },
+      include: {
+        user: {
+          select: { id: true, name: true, email: true },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    }),
+  ]);
+  const newMembersThisMonth = totalMembers - membersBeforeThisMonth;
+  const memberTrendPercentage = membersBeforeThisMonth > 0
+    ? Math.round((newMembersThisMonth / membersBeforeThisMonth) * 100)
+    : (newMembersThisMonth > 0 ? 100 : 0);
+
+  const recentMembers = recentMembersRaw.map((m) => ({
+    id: m.id,
+    name: m.user?.name || "Member",
+    email: m.user?.email || "",
+    joinedAt: m.createdAt.toISOString(),
+    status: m.status,
+    role: m.role,
+  }));
+
+  // 7. Donations Trend Data Points (Milestones across the month)
+  const monthDonations = await prisma.donation.findMany({
+    where: {
+      mosqueId,
+      status: DonationStatus.POSTED,
+      date: { gte: startOfMonth, lte: endOfMonth },
+    },
+    select: { date: true, amount: true },
+    orderBy: { date: "asc" },
+  });
+
+  const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+  const milestoneDays = [
+    1,
+    Math.min(8, daysInMonth),
+    Math.min(15, daysInMonth),
+    Math.min(22, daysInMonth),
+    daysInMonth,
+  ];
+  const monthShort = now.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+  const trendDataPoints = milestoneDays.map((day) => {
+    const milestoneDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), day, 23, 59, 59, 999));
+    let cumulative = 0n;
+    for (const d of monthDonations) {
+      if (d.date <= milestoneDate) {
+        cumulative += d.amount;
+      }
+    }
+    return {
+      day,
+      label: `${monthShort} ${day}`,
+      date: milestoneDate.toISOString().slice(0, 10),
+      amount: cumulative.toString(),
+      formattedAmount: formatPoishaToCurrency(cumulative),
+    };
+  });
+
+  // 8. Upcoming Campaigns / Events
+  const upcomingCampaigns = await prisma.campaign.findMany({
+    where: {
+      mosqueId,
+      status: CampaignStatus.ACTIVE,
+    },
+    select: {
+      id: true,
+      title: true,
+      startDate: true,
+      endDate: true,
+      targetAmount: true,
+    },
+    orderBy: { startDate: "asc" },
+    take: 4,
+  });
+
+  const upcomingEvents = await Promise.all(
+    upcomingCampaigns.map(async (c) => {
+      const raisedAgg = await prisma.donation.aggregate({
+        where: { campaignId: c.id, status: DonationStatus.POSTED },
+        _sum: { amount: true },
+      });
+      const raised = raisedAgg._sum.amount ?? 0n;
+      return {
+        id: c.id,
+        title: c.title,
+        startDate: c.startDate.toISOString(),
+        endDate: c.endDate?.toISOString() || null,
+        targetAmount: c.targetAmount?.toString() || null,
+        formattedTargetAmount: c.targetAmount ? formatPoishaToCurrency(c.targetAmount) : null,
+        raisedAmount: raised.toString(),
+        formattedRaisedAmount: formatPoishaToCurrency(raised),
+      };
+    }),
+  );
+
+  // 9. Fund Allocation Distribution & Gauge
+  const fundAllocationItems = fundsSummary.map((f) => {
+    const b = BigInt(f.balance);
+    const pct = totalFundsBalance > 0n
+      ? Number((b * 10000n) / totalFundsBalance) / 100
+      : 0;
+    return {
+      id: f.id,
+      name: f.name,
+      type: f.type,
+      isRestricted: f.isRestricted,
+      balance: f.balance,
+      formattedBalance: f.formattedBalance,
+      percentage: pct,
+    };
+  });
+  const overallAllocationPercentage = totalAccountsBalance > 0n
+    ? Math.min(100, Math.max(0, Number((totalFundsBalance * 10000n) / totalAccountsBalance) / 100))
+    : 100;
+
+  // 10. Operational Quick Stats
+  const [totalCollections, activeDonorsGroups, activeStaffCount, activeCampaignsCount] = await Promise.all([
+    prisma.collectionSession.findMany({
+      where: { mosqueId },
+      select: { totalAmount: true, status: true },
+    }),
+    prisma.donation.groupBy({
+      by: ["donorName"],
+      where: { mosqueId, status: DonationStatus.POSTED, date: { gte: startOfMonth } },
+    }),
+    prisma.membership.count({
+      where: {
+        mosqueId,
+        status: MembershipStatus.ACTIVE,
+        role: { in: [Role.MOSQUE_ADMIN, Role.TREASURER, Role.COMMITTEE_MEMBER, Role.STAFF] },
+      },
+    }),
+    prisma.campaign.count({
+      where: { mosqueId, status: CampaignStatus.ACTIVE },
+    }),
+  ]);
+
+  let totalCollectedFromSessions = 0n;
+  for (const s of totalCollections) {
+    if (s.status === CollectionStatus.VERIFIED) {
+      totalCollectedFromSessions += s.totalAmount;
+    }
+  }
+
+  const quickStats = {
+    boxCollectionsCount: totalCollections.length,
+    boxCollectionsTotal: totalCollectedFromSessions.toString(),
+    formattedBoxCollectionsTotal: formatPoishaToCurrency(totalCollectedFromSessions),
+    activeDonorsCount: activeDonorsGroups.length,
+    activeStaffCount,
+    activeCampaignsCount,
+  };
+
   return {
     asOf: now,
     currentPeriod,
+    kpi: {
+      totalMembers,
+      membersTrendPercentage: memberTrendPercentage,
+      monthlyIncome: monthIncome.toString(),
+      formattedMonthlyIncome: formatPoishaToCurrency(monthIncome),
+      incomeTrendPercentage,
+      upcomingEventsCount: upcomingCampaigns.length,
+      totalFacilitiesCount: accountsSummary.length + fundsSummary.length,
+    },
+    donationsTrend: {
+      currentMonthIncome: monthIncome.toString(),
+      formattedCurrentMonthIncome: formatPoishaToCurrency(monthIncome),
+      lastMonthIncome: lastMonthIncome.toString(),
+      formattedLastMonthIncome: formatPoishaToCurrency(lastMonthIncome),
+      trendPercentage: incomeTrendPercentage,
+      dataPoints: trendDataPoints,
+    },
+    recentMembers,
+    fundAllocation: {
+      totalBalance: totalFundsBalance.toString(),
+      formattedTotalBalance: formatPoishaToCurrency(totalFundsBalance),
+      overallAllocationPercentage,
+      funds: fundAllocationItems,
+    },
+    upcomingEvents,
+    quickStats,
     balances: {
       totalAccounts: totalAccountsBalance.toString(),
       formattedTotalAccounts: formatPoishaToCurrency(totalAccountsBalance),
