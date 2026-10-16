@@ -292,21 +292,44 @@ export async function getDashboardReport(mosqueId: string) {
       ? Number((duesCollected * 10000n) / duesExpected) / 100
       : 0;
 
-  // 5. Last Month Income & Income Trend
+  // 5. Last Month Income, 2 Months Ago Income & Growth Trends
   const startOfLastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1, 0, 0, 0, 0));
   const endOfLastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0, 23, 59, 59, 999));
-  const lastMonthIncomeAgg = await prisma.donation.aggregate({
-    where: {
-      mosqueId,
-      status: DonationStatus.POSTED,
-      date: { gte: startOfLastMonth, lte: endOfLastMonth },
-    },
-    _sum: { amount: true },
-  });
+  const startOfTwoMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 2, 1, 0, 0, 0, 0));
+  const endOfTwoMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 0, 23, 59, 59, 999));
+
+  const [lastMonthIncomeAgg, twoMonthsAgoIncomeAgg] = await Promise.all([
+    prisma.donation.aggregate({
+      where: {
+        mosqueId,
+        status: DonationStatus.POSTED,
+        date: { gte: startOfLastMonth, lte: endOfLastMonth },
+      },
+      _sum: { amount: true },
+    }),
+    prisma.donation.aggregate({
+      where: {
+        mosqueId,
+        status: DonationStatus.POSTED,
+        date: { gte: startOfTwoMonthsAgo, lte: endOfTwoMonthsAgo },
+      },
+      _sum: { amount: true },
+    }),
+  ]);
+
   const lastMonthIncome = lastMonthIncomeAgg._sum.amount ?? 0n;
+  const twoMonthsAgoIncome = twoMonthsAgoIncomeAgg._sum.amount ?? 0n;
+
   const incomeTrendPercentage = lastMonthIncome > 0n
     ? Number(((monthIncome - lastMonthIncome) * 10000n) / lastMonthIncome) / 100
     : (monthIncome > 0n ? 100 : 0);
+
+  const lastMonthTrendPercentage = twoMonthsAgoIncome > 0n
+    ? Number(((lastMonthIncome - twoMonthsAgoIncome) * 10000n) / twoMonthsAgoIncome) / 100
+    : (lastMonthIncome > 0n ? 100 : 0);
+
+  const monthShort = now.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+  const lastMonthShort = startOfLastMonth.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
 
   // 6. Members & Trend
   const [totalMembers, membersBeforeThisMonth, recentMembersRaw] = await Promise.all([
@@ -345,27 +368,38 @@ export async function getDashboardReport(mosqueId: string) {
     role: m.role,
   }));
 
-  // 7. Donations Trend Data Points (Milestones across the month)
-  const monthDonations = await prisma.donation.findMany({
-    where: {
-      mosqueId,
-      status: DonationStatus.POSTED,
-      date: { gte: startOfMonth, lte: endOfMonth },
-    },
-    select: { date: true, amount: true },
-    orderBy: { date: "asc" },
-  });
+  // 7. Donations Trend Data Points (Milestones across current month & last month)
+  const [monthDonations, lastMonthDonations] = await Promise.all([
+    prisma.donation.findMany({
+      where: {
+        mosqueId,
+        status: DonationStatus.POSTED,
+        date: { gte: startOfMonth, lte: endOfMonth },
+      },
+      select: { date: true, amount: true },
+      orderBy: { date: "asc" },
+    }),
+    prisma.donation.findMany({
+      where: {
+        mosqueId,
+        status: DonationStatus.POSTED,
+        date: { gte: startOfLastMonth, lte: endOfLastMonth },
+      },
+      select: { date: true, amount: true },
+      orderBy: { date: "asc" },
+    }),
+  ]);
 
+  // Current Month Milestones
   const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
-  const milestoneDays = [
+  const currentMonthMilestoneDays = [
     1,
     Math.min(8, daysInMonth),
     Math.min(15, daysInMonth),
     Math.min(22, daysInMonth),
     daysInMonth,
   ];
-  const monthShort = now.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
-  const trendDataPoints = milestoneDays.map((day) => {
+  const currentMonthPoints = currentMonthMilestoneDays.map((day) => {
     const milestoneDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), day, 23, 59, 59, 999));
     let cumulative = 0n;
     for (const d of monthDonations) {
@@ -376,6 +410,32 @@ export async function getDashboardReport(mosqueId: string) {
     return {
       day,
       label: `${monthShort} ${day}`,
+      date: milestoneDate.toISOString().slice(0, 10),
+      amount: cumulative.toString(),
+      formattedAmount: formatPoishaToCurrency(cumulative),
+    };
+  });
+
+  // Last Month Milestones
+  const daysInLastMonth = new Date(Date.UTC(startOfLastMonth.getUTCFullYear(), startOfLastMonth.getUTCMonth() + 1, 0)).getUTCDate();
+  const lastMonthMilestoneDays = [
+    1,
+    Math.min(8, daysInLastMonth),
+    Math.min(15, daysInLastMonth),
+    Math.min(22, daysInLastMonth),
+    daysInLastMonth,
+  ];
+  const lastMonthPoints = lastMonthMilestoneDays.map((day) => {
+    const milestoneDate = new Date(Date.UTC(startOfLastMonth.getUTCFullYear(), startOfLastMonth.getUTCMonth(), day, 23, 59, 59, 999));
+    let cumulative = 0n;
+    for (const d of lastMonthDonations) {
+      if (d.date <= milestoneDate) {
+        cumulative += d.amount;
+      }
+    }
+    return {
+      day,
+      label: `${lastMonthShort} ${day}`,
       date: milestoneDate.toISOString().slice(0, 10),
       amount: cumulative.toString(),
       formattedAmount: formatPoishaToCurrency(cumulative),
@@ -492,10 +552,15 @@ export async function getDashboardReport(mosqueId: string) {
     donationsTrend: {
       currentMonthIncome: monthIncome.toString(),
       formattedCurrentMonthIncome: formatPoishaToCurrency(monthIncome),
+      currentMonthLabel: monthShort,
       lastMonthIncome: lastMonthIncome.toString(),
       formattedLastMonthIncome: formatPoishaToCurrency(lastMonthIncome),
+      lastMonthLabel: lastMonthShort,
       trendPercentage: incomeTrendPercentage,
-      dataPoints: trendDataPoints,
+      lastMonthTrendPercentage,
+      currentMonthPoints,
+      lastMonthPoints,
+      dataPoints: currentMonthPoints,
     },
     recentMembers,
     fundAllocation: {

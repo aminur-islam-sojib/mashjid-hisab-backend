@@ -65,15 +65,19 @@ describe("Invariant Suite: Dashboard Dynamic Data", () => {
     // Donations Trend Verification
     assert.ok(report.donationsTrend, "report.donationsTrend must be defined");
     assert.equal(report.donationsTrend.currentMonthIncome, "845000");
-    assert.equal(report.donationsTrend.dataPoints.length, 5);
+    assert.equal(report.donationsTrend.currentMonthPoints.length, 5);
+    assert.equal(report.donationsTrend.lastMonthPoints.length, 5);
+    assert.equal(typeof report.donationsTrend.currentMonthLabel, "string");
+    assert.equal(typeof report.donationsTrend.lastMonthLabel, "string");
+    assert.equal(typeof report.donationsTrend.lastMonthTrendPercentage, "number");
     // Last data point must reflect full cumulative amount
-    const lastPoint = report.donationsTrend.dataPoints[report.donationsTrend.dataPoints.length - 1];
-    assert.equal(lastPoint.amount, "845000");
+    const lastPoint = report.donationsTrend.currentMonthPoints[report.donationsTrend.currentMonthPoints.length - 1];
+    assert.equal(lastPoint?.amount, "845000");
 
     // Recent Members Verification
     assert.ok(Array.isArray(report.recentMembers), "report.recentMembers must be an array");
     assert.ok(report.recentMembers.length >= 1, "Should list at least the memberships created");
-    assert.ok(report.recentMembers[0].name.length > 0);
+    assert.ok((report.recentMembers[0]?.name.length ?? 0) > 0);
 
     // Fund Allocation Verification
     assert.ok(report.fundAllocation, "report.fundAllocation must be defined");
@@ -83,7 +87,7 @@ describe("Invariant Suite: Dashboard Dynamic Data", () => {
     // Upcoming Events Verification
     assert.ok(Array.isArray(report.upcomingEvents));
     assert.equal(report.upcomingEvents.length, 1);
-    assert.equal(report.upcomingEvents[0].title, "Community Iftar Drive");
+    assert.equal(report.upcomingEvents[0]?.title, "Community Iftar Drive");
 
     // Quick Stats Verification
     assert.ok(report.quickStats);
