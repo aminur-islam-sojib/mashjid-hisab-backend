@@ -16,6 +16,7 @@ export interface CreateMosqueInput {
 
 export interface GetUserMosquesQuery {
   search?: string;
+  includeArchived?: boolean;
 }
 
 /**
@@ -35,6 +36,11 @@ export function validateGetUserMosquesQuery(query: unknown): GetUserMosquesQuery
       throw HttpError.badRequest("Search query cannot exceed 100 characters.");
     }
     result.search = trimmed;
+  }
+
+  if (raw["includeArchived"] !== undefined) {
+    result.includeArchived =
+      raw["includeArchived"] === "true" || raw["includeArchived"] === true;
   }
 
   return result;
@@ -316,3 +322,30 @@ export function validateUpdateMosqueInput(body: unknown): UpdateMosqueInput {
 
   return input;
 }
+
+export interface RequestMosqueArchiveInput {
+  reason?: string;
+}
+
+/**
+ * Validates request payload for POST /api/mosques/:mosqueId/archive-request
+ */
+export function validateRequestMosqueArchiveInput(body: unknown): RequestMosqueArchiveInput {
+  if (!body || typeof body !== "object") return {};
+  const raw = body as Record<string, unknown>;
+  const result: RequestMosqueArchiveInput = {};
+
+  if (raw["reason"] !== undefined && raw["reason"] !== null && raw["reason"] !== "") {
+    if (typeof raw["reason"] !== "string") {
+      throw HttpError.badRequest("Reason must be a string.", "INVALID_REASON");
+    }
+    const trimmed = raw["reason"].trim();
+    if (trimmed.length > 500) {
+      throw HttpError.badRequest("Reason cannot exceed 500 characters.", "INVALID_REASON");
+    }
+    result.reason = trimmed;
+  }
+
+  return result;
+}
+

@@ -37,9 +37,13 @@ model Mosque {
   /// Public transparency toggle — backward compatibility
   publicTransparency        Boolean   @default(false)
 
-  // -- Soft delete / lifecycle ----------------------------------------------
-  isArchived Boolean   @default(false)
-  archivedAt DateTime?
+  // -- Soft delete / lifecycle & Super Admin Archive Request -----------------
+  isArchived             Boolean   @default(false)
+  archivedAt             DateTime?
+  archiveRequested       Boolean   @default(false)
+  archiveRequestedAt     DateTime?
+  archiveRequestReason   String?
+  archiveRequestedById   String?
 
   // -- Timestamps -----------------------------------------------------------
   createdAt DateTime @default(now())

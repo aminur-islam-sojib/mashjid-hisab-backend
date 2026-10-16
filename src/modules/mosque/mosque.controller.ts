@@ -11,6 +11,7 @@ import {
   validateMosqueIdParam,
   validateMosqueSlugParam,
   validateUpdateMosqueInput,
+  validateRequestMosqueArchiveInput,
 } from "./mosque.validation.js";
 import {
   createMosque,
@@ -19,6 +20,11 @@ import {
   getMosqueSettings,
   updateMosque,
   archiveMosque,
+  unarchiveMosque,
+  requestMosqueArchive,
+  cancelMosqueArchiveRequest,
+  rejectMosqueArchiveRequest,
+  getPendingArchiveRequests,
   getPublicMosqueBySlug,
 } from "./mosque.service.js";
 
@@ -59,6 +65,7 @@ export const getUserMosquesHandler = catchAsync(
     const mosques = await getUserMosques(userId, {
       currentMosqueId,
       search: query.search,
+      includeArchived: query.includeArchived,
     });
 
     sendResponse(res, {
@@ -137,6 +144,107 @@ export const archiveMosqueHandler = catchAsync(
       statusCode: 200,
       message: "Mosque archived successfully.",
       data: archivedMosque,
+    });
+  },
+);
+
+/**
+ * POST /api/mosques/:mosqueId/unarchive
+ * Access: Authenticated + MOSQUE_ADMIN (allowArchived: true)
+ *
+ * Restores the archived mosque (sets isArchived: false, archivedAt: null).
+ */
+export const unarchiveMosqueHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+
+    const restoredMosque = await unarchiveMosque(mosqueId);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Mosque workspace restored successfully.",
+      data: restoredMosque,
+    });
+  },
+);
+
+/**
+ * POST /api/mosques/:mosqueId/archive-request
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Submits an archive request for the mosque to be reviewed by a Super Admin.
+ */
+export const requestMosqueArchiveHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const userId = req.user!.sub;
+    const { reason } = validateRequestMosqueArchiveInput(req.body);
+
+    const result = await requestMosqueArchive(mosqueId, userId, reason);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: result.message,
+      data: result,
+    });
+  },
+);
+
+/**
+ * DELETE /api/mosques/:mosqueId/archive-request
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Cancels a pending archive request for the mosque.
+ */
+export const cancelMosqueArchiveRequestHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const userId = req.user!.sub;
+
+    const result = await cancelMosqueArchiveRequest(mosqueId, userId);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: result.message,
+      data: result,
+    });
+  },
+);
+
+/**
+ * POST /api/mosques/:mosqueId/archive-request/reject
+ * Access: Authenticated + SUPER_ADMIN
+ *
+ * Rejects/dismisses a pending archive request.
+ */
+export const rejectMosqueArchiveRequestHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+
+    const result = await rejectMosqueArchiveRequest(mosqueId);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: result.message,
+      data: result,
+    });
+  },
+);
+
+/**
+ * GET /api/mosques/super-admin/archive-requests
+ * Access: Authenticated + SUPER_ADMIN
+ *
+ * Lists all mosques with pending archive requests.
+ */
+export const getPendingArchiveRequestsHandler = catchAsync(
+  async (_req: Request, res: Response): Promise<void> => {
+    const requests = await getPendingArchiveRequests();
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Pending mosque archive requests retrieved successfully.",
+      data: requests,
     });
   },
 );

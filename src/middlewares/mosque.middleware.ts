@@ -304,12 +304,40 @@ export function requireMosqueMembership(
         },
       });
 
-      // 4. Must exist and membership must be ACTIVE.
-      // Returns 404 (not 403) to prevent leaking existence of private tenants.
-      if (!membership || membership.status !== MembershipStatus.ACTIVE) {
+      // 4. Must exist (returns 404 to prevent leaking existence of private tenants to non-members)
+      if (!membership) {
         throw HttpError.notFound(
           "Mosque not found.",
           "MOSQUE_NOT_FOUND",
+        );
+      }
+
+      // 4a. If membership exists, enforce active status with explicit reason
+      if (membership.status === MembershipStatus.SUSPENDED) {
+        throw HttpError.forbidden(
+          "Your membership in this mosque has been suspended. Please contact the mosque administrator.",
+          "MEMBERSHIP_SUSPENDED",
+        );
+      }
+
+      if (membership.status === MembershipStatus.PENDING) {
+        throw HttpError.forbidden(
+          "Your membership request is pending approval by the mosque administrator.",
+          "MEMBERSHIP_PENDING",
+        );
+      }
+
+      if (membership.status === MembershipStatus.REJECTED) {
+        throw HttpError.forbidden(
+          "Your membership request for this mosque was rejected.",
+          "MEMBERSHIP_REJECTED",
+        );
+      }
+
+      if (membership.status !== MembershipStatus.ACTIVE) {
+        throw HttpError.forbidden(
+          "Your membership in this mosque is not active.",
+          "MEMBERSHIP_NOT_ACTIVE",
         );
       }
 

@@ -665,14 +665,16 @@ export async function getAuthenticatedUser(
       status: true,
       role: true,
       memberships: {
-        where: { status: MembershipStatus.ACTIVE },
+        where: {
+          status: { in: [MembershipStatus.ACTIVE, MembershipStatus.SUSPENDED] },
+        },
         select: {
           id: true,
           mosqueId: true,
           role: true,
           status: true,
           mosque: {
-            select: { id: true, name: true, slug: true },
+            select: { id: true, name: true, slug: true, isArchived: true },
           },
         },
       },
@@ -693,10 +695,20 @@ export async function getAuthenticatedUser(
     );
   }
 
-  // Resolve current active membership
-  let active = user.memberships.find((m) => m.mosqueId === activeMosqueId);
-  if (!active && user.memberships.length === 1) {
-    active = user.memberships[0];
+  if (user.status === UserStatus.INACTIVE) {
+    throw HttpError.forbidden(
+      "Your account is inactive. Please contact support to reactivate your account.",
+      "ACCOUNT_INACTIVE",
+    );
+  }
+
+  // Resolve current active membership (only ACTIVE memberships in non-archived mosques can be active session context)
+  const activeMemberships = user.memberships.filter(
+    (m) => m.status === MembershipStatus.ACTIVE && !m.mosque?.isArchived,
+  );
+  let active = activeMemberships.find((m) => m.mosqueId === activeMosqueId);
+  if (!active && activeMemberships.length === 1) {
+    active = activeMemberships[0];
   }
 
   return {

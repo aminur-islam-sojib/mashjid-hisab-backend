@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { Router } from "express";
-import { authenticate } from "../../middlewares/auth.middleware.js";
+import { authenticate, requireSuperAdmin } from "../../middlewares/auth.middleware.js";
 import { requireMosqueMembership } from "../../middlewares/mosque.middleware.js";
 import { Role } from "../../../generated/prisma/client.js";
 import membershipRouter from "../membership/membership.routes.js";
@@ -31,6 +31,11 @@ import {
   getMosqueSettingsHandler,
   updateMosqueHandler,
   archiveMosqueHandler,
+  unarchiveMosqueHandler,
+  requestMosqueArchiveHandler,
+  cancelMosqueArchiveRequestHandler,
+  rejectMosqueArchiveRequestHandler,
+  getPendingArchiveRequestsHandler,
   getPublicMosqueBySlugHandler,
 } from "./mosque.controller.js";
 
@@ -43,6 +48,19 @@ const mosqueRouter: Router = Router();
  * Lists every mosque the caller has an ACTIVE Membership in — powers the mosque switcher.
  */
 mosqueRouter.get("/", authenticate, getUserMosquesHandler);
+
+/**
+ * GET /api/mosques/super-admin/archive-requests
+ * Access: Authenticated + SUPER_ADMIN
+ *
+ * Lists all mosques with pending archive requests.
+ */
+mosqueRouter.get(
+  "/super-admin/archive-requests",
+  authenticate,
+  requireSuperAdmin,
+  getPendingArchiveRequestsHandler,
+);
 
 
 /**
@@ -195,16 +213,70 @@ mosqueRouter.patch(
 
 /**
  * POST /api/mosques/:mosqueId/archive
- * Access: Authenticated + MOSQUE_ADMIN
+ * Access: Authenticated + SUPER_ADMIN
  *
  * Soft-deletes the mosque (sets isArchived: true).
+ * Strictly gated to platform Super Administrators.
  * Blocks if there are unresolved pending invites or active accounts with non-zero balance.
  */
 mosqueRouter.post(
   "/:mosqueId/archive",
   authenticate,
-  requireMosqueMembership(Role.MOSQUE_ADMIN),
+  requireSuperAdmin,
   archiveMosqueHandler,
+);
+
+/**
+ * POST /api/mosques/:mosqueId/unarchive
+ * Access: Authenticated + SUPER_ADMIN
+ *
+ * Restores an archived mosque (sets isArchived: false, archivedAt: null).
+ * Strictly gated to platform Super Administrators.
+ */
+mosqueRouter.post(
+  "/:mosqueId/unarchive",
+  authenticate,
+  requireSuperAdmin,
+  unarchiveMosqueHandler,
+);
+
+/**
+ * POST /api/mosques/:mosqueId/archive-request
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Submits an archive request for the mosque to be reviewed by a Super Admin.
+ */
+mosqueRouter.post(
+  "/:mosqueId/archive-request",
+  authenticate,
+  requireMosqueMembership(Role.MOSQUE_ADMIN),
+  requestMosqueArchiveHandler,
+);
+
+/**
+ * DELETE /api/mosques/:mosqueId/archive-request
+ * Access: Authenticated + MOSQUE_ADMIN
+ *
+ * Cancels a pending archive request for the mosque.
+ */
+mosqueRouter.delete(
+  "/:mosqueId/archive-request",
+  authenticate,
+  requireMosqueMembership(Role.MOSQUE_ADMIN),
+  cancelMosqueArchiveRequestHandler,
+);
+
+/**
+ * POST /api/mosques/:mosqueId/archive-request/reject
+ * Access: Authenticated + SUPER_ADMIN
+ *
+ * Super Admin rejects/dismisses a pending archive request.
+ */
+mosqueRouter.post(
+  "/:mosqueId/archive-request/reject",
+  authenticate,
+  requireSuperAdmin,
+  rejectMosqueArchiveRequestHandler,
 );
 
 /**

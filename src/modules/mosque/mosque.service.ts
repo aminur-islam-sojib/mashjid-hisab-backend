@@ -30,6 +30,7 @@ export interface CreateMosqueResult {
 export interface GetUserMosquesOptions {
   currentMosqueId?: string | null;
   search?: string;
+  includeArchived?: boolean;
 }
 
 export interface UserMosqueItem {
@@ -42,6 +43,11 @@ export interface UserMosqueItem {
   role: Role;
   membershipId: string;
   membershipStatus: MembershipStatus;
+  isArchived: boolean;
+  archivedAt: Date | null;
+  archiveRequested?: boolean;
+  archiveRequestedAt?: Date | null;
+  archiveRequestReason?: string | null;
   isCurrent: boolean;
   joinedAt: Date;
   createdAt: Date;
@@ -65,6 +71,10 @@ export interface MosqueSettings {
   publicTransparency: boolean;
   isArchived: boolean;
   archivedAt: Date | null;
+  archiveRequested: boolean;
+  archiveRequestedAt: Date | null;
+  archiveRequestReason: string | null;
+  archiveRequestedById: string | null;
   role: Role;
   createdAt: Date;
   updatedAt: Date;
@@ -76,6 +86,46 @@ export interface ArchiveMosqueResult {
   slug: string;
   isArchived: boolean;
   archivedAt: Date | null;
+}
+
+export interface UnarchiveMosqueResult {
+  id: string;
+  name: string;
+  slug: string;
+  isArchived: boolean;
+  archivedAt: Date | null;
+  updatedAt: Date;
+}
+
+export interface RequestMosqueArchiveResult {
+  success: boolean;
+  message: string;
+  mosqueId: string;
+  archiveRequestedAt: Date;
+  archiveRequestReason: string | null;
+}
+
+export interface CancelMosqueArchiveRequestResult {
+  success: boolean;
+  message: string;
+  mosqueId: string;
+}
+
+export interface PendingArchiveRequestItem {
+  id: string;
+  name: string;
+  slug: string;
+  address: string | null;
+  archiveRequestedAt: Date | null;
+  archiveRequestReason: string | null;
+  archiveRequestedById: string | null;
+  requester: {
+    id: string;
+    name: string;
+    email: string | null;
+    phone: string | null;
+  } | null;
+  createdAt: Date;
 }
 
 export interface PublicMosqueProfile {
@@ -325,13 +375,13 @@ export async function getUserMosques(
   // 1. Live account status check (ensures blocked/inactive callers cannot view tenant data)
   await assertActiveUser(userId);
 
-  // 2. Query all ACTIVE memberships with associated mosque data
+  // 2. Query memberships with associated mosque data
   const memberships = await prisma.membership.findMany({
     where: {
       userId,
-      status: MembershipStatus.ACTIVE,
+      status: { in: [MembershipStatus.ACTIVE, MembershipStatus.SUSPENDED] },
       mosque: {
-        isArchived: false,
+        ...(options?.includeArchived ? {} : { isArchived: false }),
         ...(options?.search
           ? {
               OR: [
@@ -356,6 +406,11 @@ export async function getUserMosques(
           address: true,
           timezone: true,
           fiscalYearStart: true,
+          isArchived: true,
+          archivedAt: true,
+          archiveRequested: true,
+          archiveRequestedAt: true,
+          archiveRequestReason: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -372,7 +427,7 @@ export async function getUserMosques(
   return memberships.map((m) => {
     const isCurrent = currentMosqueId
       ? m.mosqueId === currentMosqueId
-      : memberships.length === 1;
+      : memberships.length === 1 && !m.mosque.isArchived && m.status === MembershipStatus.ACTIVE;
 
     return {
       id: m.mosque.id,
@@ -384,6 +439,11 @@ export async function getUserMosques(
       role: m.role,
       membershipId: m.id,
       membershipStatus: m.status,
+      isArchived: m.mosque.isArchived,
+      archivedAt: m.mosque.archivedAt,
+      archiveRequested: m.mosque.archiveRequested,
+      archiveRequestedAt: m.mosque.archiveRequestedAt,
+      archiveRequestReason: m.mosque.archiveRequestReason,
       isCurrent,
       joinedAt: m.createdAt,
       createdAt: m.mosque.createdAt,
@@ -840,6 +900,10 @@ export async function getMosqueSettings(
           publicTransparency: true,
           isArchived: true,
           archivedAt: true,
+          archiveRequested: true,
+          archiveRequestedAt: true,
+          archiveRequestReason: true,
+          archiveRequestedById: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -865,6 +929,10 @@ export async function getMosqueSettings(
     publicTransparency: membership.mosque.publicTransparency,
     isArchived: membership.mosque.isArchived,
     archivedAt: membership.mosque.archivedAt,
+    archiveRequested: membership.mosque.archiveRequested,
+    archiveRequestedAt: membership.mosque.archiveRequestedAt,
+    archiveRequestReason: membership.mosque.archiveRequestReason,
+    archiveRequestedById: membership.mosque.archiveRequestedById,
     role: membership.role,
     createdAt: membership.mosque.createdAt,
     updatedAt: membership.mosque.updatedAt,
@@ -956,6 +1024,10 @@ export async function updateMosque(
       publicTransparency: true,
       isArchived: true,
       archivedAt: true,
+      archiveRequested: true,
+      archiveRequestedAt: true,
+      archiveRequestReason: true,
+      archiveRequestedById: true,
       createdAt: true,
       updatedAt: true,
     },
@@ -1041,6 +1113,10 @@ export async function archiveMosque(mosqueId: string): Promise<ArchiveMosqueResu
     data: {
       isArchived: true,
       archivedAt: new Date(),
+      archiveRequested: false,
+      archiveRequestedAt: null,
+      archiveRequestReason: null,
+      archiveRequestedById: null,
     },
     select: {
       id: true,
@@ -1053,3 +1129,258 @@ export async function archiveMosque(mosqueId: string): Promise<ArchiveMosqueResu
 
   return archived;
 }
+
+/**
+ * Restores a soft-deleted (archived) mosque tenant by setting `isArchived: false` and `archivedAt: null`.
+ *
+ * Safety rails enforced:
+ * 1. Blocks if the mosque does not exist (404 MOSQUE_NOT_FOUND).
+ * 2. Blocks if the mosque is already active / not archived (400 MOSQUE_NOT_ARCHIVED).
+ *
+ * @param mosqueId - Target mosque unique ID.
+ * @returns The restored mosque record.
+ */
+export async function unarchiveMosque(mosqueId: string): Promise<UnarchiveMosqueResult> {
+  // 1. Fetch current mosque
+  const mosque = await prisma.mosque.findUnique({
+    where: { id: mosqueId },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      isArchived: true,
+    },
+  });
+
+  if (!mosque) {
+    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
+  }
+
+  if (!mosque.isArchived) {
+    throw HttpError.badRequest(
+      "Operation rejected: Mosque is not archived.",
+      "MOSQUE_NOT_ARCHIVED",
+    );
+  }
+
+  // 2. Restore the mosque
+  const restored = await prisma.mosque.update({
+    where: { id: mosqueId },
+    data: {
+      isArchived: false,
+      archivedAt: null,
+    },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      isArchived: true,
+      archivedAt: true,
+      updatedAt: true,
+    },
+  });
+
+  return restored;
+}
+
+/**
+ * Submits an archive request for a mosque workspace to be reviewed by a Super Admin.
+ *
+ * Safety rails:
+ * 1. Blocks if the mosque does not exist (404 MOSQUE_NOT_FOUND).
+ * 2. Blocks if the mosque is already archived (400 MOSQUE_ALREADY_ARCHIVED).
+ * 3. Blocks if an archive request is already pending (400 MOSQUE_ARCHIVE_REQUEST_ALREADY_PENDING).
+ */
+export async function requestMosqueArchive(
+  mosqueId: string,
+  userId: string,
+  reason?: string,
+): Promise<RequestMosqueArchiveResult> {
+  const mosque = await prisma.mosque.findUnique({
+    where: { id: mosqueId },
+    select: {
+      id: true,
+      name: true,
+      isArchived: true,
+      archiveRequested: true,
+    },
+  });
+
+  if (!mosque) {
+    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
+  }
+
+  if (mosque.isArchived) {
+    throw HttpError.badRequest(
+      "Cannot request archive: Mosque is already archived.",
+      "MOSQUE_ALREADY_ARCHIVED",
+    );
+  }
+
+  if (mosque.archiveRequested) {
+    throw HttpError.badRequest(
+      "An archive request is already pending for this mosque.",
+      "MOSQUE_ARCHIVE_REQUEST_ALREADY_PENDING",
+    );
+  }
+
+  const requestedAt = new Date();
+  const trimmedReason = reason?.trim() ? reason.trim().slice(0, 500) : null;
+
+  await prisma.mosque.update({
+    where: { id: mosqueId },
+    data: {
+      archiveRequested: true,
+      archiveRequestedAt: requestedAt,
+      archiveRequestReason: trimmedReason,
+      archiveRequestedById: userId,
+    },
+  });
+
+  return {
+    success: true,
+    message: "Archive request submitted successfully. It will be reviewed by a platform super administrator.",
+    mosqueId: mosque.id,
+    archiveRequestedAt: requestedAt,
+    archiveRequestReason: trimmedReason,
+  };
+}
+
+/**
+ * Cancels a pending archive request for a mosque workspace.
+ * Callable by MOSQUE_ADMIN or SUPER_ADMIN.
+ */
+export async function cancelMosqueArchiveRequest(
+  mosqueId: string,
+  userId: string,
+): Promise<CancelMosqueArchiveRequestResult> {
+  const mosque = await prisma.mosque.findUnique({
+    where: { id: mosqueId },
+    select: {
+      id: true,
+      name: true,
+      archiveRequested: true,
+    },
+  });
+
+  if (!mosque) {
+    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
+  }
+
+  if (!mosque.archiveRequested) {
+    throw HttpError.badRequest(
+      "No pending archive request found for this mosque.",
+      "NO_PENDING_ARCHIVE_REQUEST",
+    );
+  }
+
+  await prisma.mosque.update({
+    where: { id: mosqueId },
+    data: {
+      archiveRequested: false,
+      archiveRequestedAt: null,
+      archiveRequestReason: null,
+      archiveRequestedById: null,
+    },
+  });
+
+  return {
+    success: true,
+    message: "Mosque archive request cancelled successfully.",
+    mosqueId: mosque.id,
+  };
+}
+
+/**
+ * Super Admin rejects/dismisses a pending archive request for a mosque workspace.
+ */
+export async function rejectMosqueArchiveRequest(
+  mosqueId: string,
+): Promise<CancelMosqueArchiveRequestResult> {
+  const mosque = await prisma.mosque.findUnique({
+    where: { id: mosqueId },
+    select: {
+      id: true,
+      name: true,
+      archiveRequested: true,
+    },
+  });
+
+  if (!mosque) {
+    throw HttpError.notFound("Mosque not found.", "MOSQUE_NOT_FOUND");
+  }
+
+  if (!mosque.archiveRequested) {
+    throw HttpError.badRequest(
+      "No pending archive request found for this mosque.",
+      "NO_PENDING_ARCHIVE_REQUEST",
+    );
+  }
+
+  await prisma.mosque.update({
+    where: { id: mosqueId },
+    data: {
+      archiveRequested: false,
+      archiveRequestedAt: null,
+      archiveRequestReason: null,
+      archiveRequestedById: null,
+    },
+  });
+
+  return {
+    success: true,
+    message: "Mosque archive request has been rejected.",
+    mosqueId: mosque.id,
+  };
+}
+
+/**
+ * Retrieves all mosques with pending archive requests for platform Super Admin review.
+ */
+export async function getPendingArchiveRequests(): Promise<PendingArchiveRequestItem[]> {
+  const mosques = await prisma.mosque.findMany({
+    where: {
+      archiveRequested: true,
+      isArchived: false,
+    },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      address: true,
+      archiveRequestedAt: true,
+      archiveRequestReason: true,
+      archiveRequestedById: true,
+      createdAt: true,
+    },
+    orderBy: {
+      archiveRequestedAt: "desc",
+    },
+  });
+
+  const requesterIds = Array.from(
+    new Set(mosques.map((m) => m.archiveRequestedById).filter(Boolean) as string[]),
+  );
+
+  const users = requesterIds.length > 0
+    ? await prisma.user.findMany({
+        where: { id: { in: requesterIds } },
+        select: { id: true, name: true, email: true, phone: true },
+      })
+    : [];
+
+  const userMap = new Map(users.map((u) => [u.id, u]));
+
+  return mosques.map((m) => ({
+    id: m.id,
+    name: m.name,
+    slug: m.slug,
+    address: m.address,
+    archiveRequestedAt: m.archiveRequestedAt,
+    archiveRequestReason: m.archiveRequestReason,
+    archiveRequestedById: m.archiveRequestedById,
+    requester: m.archiveRequestedById ? (userMap.get(m.archiveRequestedById) ?? null) : null,
+    createdAt: m.createdAt,
+  }));
+}
+
