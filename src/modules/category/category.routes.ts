@@ -16,9 +16,24 @@ import {
   getMosqueCategoriesHandler,
   updateCategoryHandler,
   archiveCategoryHandler,
+  seedCategoriesHandler,
 } from "./category.controller.js";
 
 const categoryRouter: Router = Router({ mergeParams: true });
+
+/**
+ * POST /api/mosques/:mosqueId/categories/seed
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER
+ *
+ * Seeds default Income and Expense categories for the mosque.
+ * Completely idempotent: skips any category that already exists.
+ */
+categoryRouter.post(
+  "/seed",
+  authenticate,
+  requireMosqueMembership(...FINANCIAL_OPERATOR_ROLES),
+  seedCategoriesHandler,
+);
 
 /**
  * POST /api/mosques/:mosqueId/categories

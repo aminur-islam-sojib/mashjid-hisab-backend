@@ -555,5 +555,14 @@ export async function archiveCategory(
   };
 }
 
+export {
+  seedDefaultCategoriesForMosque,
+  DEFAULT_INCOME_CATEGORIES,
+  DEFAULT_EXPENSE_CATEGORIES,
+  type SeedDefaultCategoriesResult,
+  type SeedDefaultCategoriesOptions,
+  type DefaultCategoryTemplate,
+} from "./category.catalog.js";
+
 
 

@@ -8,6 +8,7 @@
   "main": "server.ts",
   "scripts": {
     "dev": "tsx watch src/server.ts",
+    "seed:categories": "tsx scripts/seed-categories.ts",
     "test": "tsx --test --test-concurrency=1 \"tests/**/*.test.ts\""
   },
   "devDependencies": {

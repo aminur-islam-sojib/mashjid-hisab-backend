@@ -18,6 +18,7 @@ import {
   getMosqueCategories,
   updateCategory,
   archiveCategory,
+  seedDefaultCategoriesForMosque,
 } from "./category.service.js";
 
 /**
@@ -129,6 +130,28 @@ export const archiveCategoryHandler = catchAsync(
     });
   },
 );
+
+/**
+ * POST /api/mosques/:mosqueId/categories/seed
+ * Access: Authenticated + MOSQUE_ADMIN, TREASURER
+ *
+ * Seeds default Income and Expense categories for the mosque.
+ * Completely idempotent: skips any category that already exists.
+ */
+export const seedCategoriesHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+
+    const result = await seedDefaultCategoriesForMosque(mosqueId);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: `Standard categories initialized: ${result.createdCount} created, ${result.skippedCount} already existed.`,
+      data: result,
+    });
+  },
+);
+
 
 
 

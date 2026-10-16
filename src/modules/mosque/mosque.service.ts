@@ -11,10 +11,12 @@ import {
   MembershipStatus,
   UserStatus,
   InviteStatus,
+  FundType,
   type Mosque,
   type Membership,
   Prisma,
 } from "../../../generated/prisma/client.js";
+import { seedDefaultCategoriesForMosque } from "../category/category.catalog.js";
 import type {
   CreateMosqueInput,
   UpdateMosqueInput,
@@ -283,6 +285,19 @@ export async function createMosque(
           invitedById: null,
         },
       });
+
+      // Step C: Initialize default General Fund
+      await tx.fund.create({
+        data: {
+          mosqueId: mosque.id,
+          name: "General Operating Fund",
+          type: FundType.GENERAL,
+          isRestricted: false,
+        },
+      });
+
+      // Step D: Initialize standard Income and Expense Categories
+      await seedDefaultCategoriesForMosque(mosque.id, { tx });
 
       return { mosque, membership };
     });
