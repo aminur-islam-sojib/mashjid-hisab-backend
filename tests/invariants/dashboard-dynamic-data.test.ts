@@ -60,6 +60,11 @@ describe("Invariant Suite: Dashboard Dynamic Data", () => {
     assert.equal(typeof report.kpi.totalMembers, "number");
     assert.ok(report.kpi.totalMembers >= 1, "Should have at least the admin member");
     assert.equal(report.kpi.monthlyIncome, "845000");
+    assert.equal(typeof report.kpi.totalTreasuryBalance, "string");
+    assert.ok(BigInt(report.kpi.totalTreasuryBalance) > 0n);
+    assert.equal(typeof report.kpi.monthlyExpense, "string");
+    assert.equal(typeof report.kpi.expenseTrendPercentage, "number");
+    assert.equal(typeof report.kpi.pendingApprovalsCount, "number");
     assert.equal(report.kpi.upcomingEventsCount, 1);
 
     // Donations Trend Verification

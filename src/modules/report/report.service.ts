@@ -298,7 +298,7 @@ export async function getDashboardReport(mosqueId: string) {
   const startOfTwoMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 2, 1, 0, 0, 0, 0));
   const endOfTwoMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 0, 23, 59, 59, 999));
 
-  const [lastMonthIncomeAgg, twoMonthsAgoIncomeAgg] = await Promise.all([
+  const [lastMonthIncomeAgg, twoMonthsAgoIncomeAgg, lastMonthExpenseAgg] = await Promise.all([
     prisma.donation.aggregate({
       where: {
         mosqueId,
@@ -315,14 +315,27 @@ export async function getDashboardReport(mosqueId: string) {
       },
       _sum: { amount: true },
     }),
+    prisma.expense.aggregate({
+      where: {
+        mosqueId,
+        status: ExpenseStatus.POSTED,
+        date: { gte: startOfLastMonth, lte: endOfLastMonth },
+      },
+      _sum: { amount: true },
+    }),
   ]);
 
   const lastMonthIncome = lastMonthIncomeAgg._sum.amount ?? 0n;
   const twoMonthsAgoIncome = twoMonthsAgoIncomeAgg._sum.amount ?? 0n;
+  const lastMonthExpense = lastMonthExpenseAgg._sum.amount ?? 0n;
 
   const incomeTrendPercentage = lastMonthIncome > 0n
     ? Number(((monthIncome - lastMonthIncome) * 10000n) / lastMonthIncome) / 100
     : (monthIncome > 0n ? 100 : 0);
+
+  const expenseTrendPercentage = lastMonthExpense > 0n
+    ? Number(((monthExpense - lastMonthExpense) * 10000n) / lastMonthExpense) / 100
+    : (monthExpense > 0n ? 100 : 0);
 
   const lastMonthTrendPercentage = twoMonthsAgoIncome > 0n
     ? Number(((lastMonthIncome - twoMonthsAgoIncome) * 10000n) / twoMonthsAgoIncome) / 100
@@ -541,11 +554,26 @@ export async function getDashboardReport(mosqueId: string) {
     asOf: now,
     currentPeriod,
     kpi: {
-      totalMembers,
-      membersTrendPercentage: memberTrendPercentage,
+      totalTreasuryBalance: totalAccountsBalance.toString(),
+      formattedTotalTreasuryBalance: formatPoishaToCurrency(totalAccountsBalance),
+      accountsCount: accountsSummary.length,
+      unallocatedBalance: (totalAccountsBalance - totalFundsBalance).toString(),
+      formattedUnallocatedBalance: formatPoishaToCurrency(totalAccountsBalance - totalFundsBalance),
       monthlyIncome: monthIncome.toString(),
       formattedMonthlyIncome: formatPoishaToCurrency(monthIncome),
       incomeTrendPercentage,
+      monthlyExpense: monthExpense.toString(),
+      formattedMonthlyExpense: formatPoishaToCurrency(monthExpense),
+      lastMonthExpense: lastMonthExpense.toString(),
+      formattedLastMonthExpense: formatPoishaToCurrency(lastMonthExpense),
+      expenseTrendPercentage,
+      pendingApprovalsCount: pendingDonations + pendingExpenses,
+      pendingApprovalsAmount: totalPendingAmount.toString(),
+      formattedPendingApprovalsAmount: formatPoishaToCurrency(totalPendingAmount),
+      pendingDonationsCount: pendingDonations,
+      pendingExpensesCount: pendingExpenses,
+      totalMembers,
+      membersTrendPercentage: memberTrendPercentage,
       upcomingEventsCount: upcomingCampaigns.length,
       totalFacilitiesCount: accountsSummary.length + fundsSummary.length,
     },
