@@ -20,13 +20,13 @@ import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import app from "../../src/app.js";
 import { prisma } from "../../src/lib/prisma.js";
-import { Role, IdempotencyStatus } from "../../generated/prisma/client.js";
 import { createTestTenantFixture, type TestTenantFixture } from "../helpers/test-factory.js";
 import { signAccessToken } from "../../src/utils/token.js";
 import {
   canonicalJsonStringify,
   computeRequestHash,
 } from "../../src/middlewares/idempotency.middleware.js";
+import { IdempotencyStatus, Role } from "../../generated/prisma/enums.js";
 
 describe("Invariant Suite: Idempotency & Double-Submit Protection (T03)", () => {
   let fixture: TestTenantFixture;
