@@ -25,6 +25,8 @@ import {
   addFamilyMember,
   updateFamilyMember,
   removeFamilyMember,
+  getFamilyByMembership,
+  addFamilyMemberByMembership,
 } from "./family.service.js";
 
 /**
@@ -205,6 +207,52 @@ export const removeFamilyMemberHandler = catchAsync(
       statusCode: 200,
       message: "Family member removed successfully.",
       data: { id: memberId },
+    });
+  },
+);
+
+/**
+ * GET /api/mosques/:mosqueId/families/member/:membershipId
+ * Access: Authenticated, target member or OVERSIGHT
+ */
+export const getFamilyByMembershipHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const membershipId = validateFamilyMemberIdParam(req.params["membershipId"]);
+    const membership = requireMembership(req);
+
+    const family = await getFamilyByMembership(mosqueId, membershipId, membership);
+
+    sendResponse(res, {
+      statusCode: 200,
+      message: "Family retrieved successfully.",
+      data: family,
+    });
+  },
+);
+
+/**
+ * POST /api/mosques/:mosqueId/families/member/:membershipId/members
+ * Access: Authenticated, target member or MOSQUE_ADMIN/oversight
+ */
+export const addFamilyMemberByMembershipHandler = catchAsync(
+  async (req: Request, res: Response): Promise<void> => {
+    const mosqueId = req.mosqueId || validateMosqueIdParam(req.params["mosqueId"]);
+    const membershipId = validateFamilyMemberIdParam(req.params["membershipId"]);
+    const membership = requireMembership(req);
+    const input = validateCreateFamilyMemberInput(req.body);
+
+    const member = await addFamilyMemberByMembership(
+      mosqueId,
+      membershipId,
+      membership,
+      input,
+    );
+
+    sendResponse(res, {
+      statusCode: 201,
+      message: "Family member added successfully.",
+      data: member,
     });
   },
 );

@@ -12,6 +12,7 @@ import { FamilyRelation } from "../../../generated/prisma/client.js";
 export interface CreateFamilyInput {
   name: string;
   address?: string;
+  headMembershipId?: string;
 }
 
 /**
@@ -20,6 +21,7 @@ export interface CreateFamilyInput {
  * Rules:
  * - name: required string, 2-100 chars after trimming
  * - address: optional string, max 200 chars
+ * - headMembershipId: optional string (admin-only)
  */
 export function validateCreateFamilyInput(body: unknown): CreateFamilyInput {
   if (!body || typeof body !== "object") {
@@ -68,11 +70,31 @@ export function validateCreateFamilyInput(body: unknown): CreateFamilyInput {
     }
   }
 
+  // -- headMembershipId (optional, admin-assigned) -----------------------------
+  let headMembershipId: string | undefined;
+  if (
+    raw["headMembershipId"] !== undefined &&
+    raw["headMembershipId"] !== null &&
+    raw["headMembershipId"] !== ""
+  ) {
+    if (
+      typeof raw["headMembershipId"] !== "string" ||
+      !raw["headMembershipId"].trim()
+    ) {
+      issues.push({
+        field: "headMembershipId",
+        issue: "Head membership ID must be a non-empty string.",
+      });
+    } else {
+      headMembershipId = raw["headMembershipId"].trim();
+    }
+  }
+
   if (issues.length > 0) {
     throw HttpError.validationError(issues);
   }
 
-  return { name, address };
+  return { name, address, headMembershipId };
 }
 
 export interface UpdateFamilyInput {
@@ -225,7 +247,7 @@ export interface CreateFamilyMemberInput {
   name: string;
   relation: FamilyRelation;
   dateOfBirth?: Date;
-  gender?: string;
+  gender?: "Male" | "Female";
   phone?: string;
   occupation?: string;
   bloodGroup?: string;
@@ -237,7 +259,8 @@ export interface CreateFamilyMemberInput {
  * Rules:
  * - name: required string, 2-100 chars.
  * - relation: required, must be a valid FamilyRelation.
- * - dateOfBirth, gender, phone, occupation, bloodGroup: all optional.
+ * - gender: optional, must be strictly 'Male' or 'Female'.
+ * - dateOfBirth, phone, occupation, bloodGroup: all optional.
  */
 export function validateCreateFamilyMemberInput(body: unknown): CreateFamilyMemberInput {
   if (!body || typeof body !== "object") {
@@ -298,8 +321,27 @@ export function validateCreateFamilyMemberInput(body: unknown): CreateFamilyMemb
     }
   }
 
-  // -- gender / phone / occupation / bloodGroup (all optional strings) --------
-  for (const field of ["gender", "phone", "occupation", "bloodGroup"] as const) {
+  // -- gender (optional: strictly 'Male' or 'Female') ---------------------------
+  if (raw["gender"] !== undefined && raw["gender"] !== null && raw["gender"] !== "") {
+    if (typeof raw["gender"] !== "string") {
+      issues.push({ field: "gender", issue: "Gender must be a string." });
+    } else {
+      const cleanGender = raw["gender"].trim().toLowerCase();
+      if (cleanGender === "male") {
+        input.gender = "Male";
+      } else if (cleanGender === "female") {
+        input.gender = "Female";
+      } else {
+        issues.push({
+          field: "gender",
+          issue: "Gender must be either 'Male' or 'Female'.",
+        });
+      }
+    }
+  }
+
+  // -- phone / occupation / bloodGroup (all optional strings) ------------------
+  for (const field of ["phone", "occupation", "bloodGroup"] as const) {
     const value = raw[field];
     if (value !== undefined && value !== null && value !== "") {
       if (typeof value !== "string") {
@@ -326,7 +368,7 @@ export interface UpdateFamilyMemberInput {
   name?: string;
   relation?: FamilyRelation;
   dateOfBirth?: Date | null;
-  gender?: string | null;
+  gender?: "Male" | "Female" | null;
   phone?: string | null;
   occupation?: string | null;
   bloodGroup?: string | null;
@@ -396,7 +438,28 @@ export function validateUpdateFamilyMemberInput(body: unknown): UpdateFamilyMemb
     }
   }
 
-  for (const field of ["gender", "phone", "occupation", "bloodGroup"] as const) {
+  if (raw["gender"] !== undefined) {
+    hasUpdateFields = true;
+    if (raw["gender"] === null || raw["gender"] === "") {
+      input.gender = null;
+    } else if (typeof raw["gender"] !== "string") {
+      issues.push({ field: "gender", issue: "Gender must be a string or null." });
+    } else {
+      const cleanGender = raw["gender"].trim().toLowerCase();
+      if (cleanGender === "male") {
+        input.gender = "Male";
+      } else if (cleanGender === "female") {
+        input.gender = "Female";
+      } else {
+        issues.push({
+          field: "gender",
+          issue: "Gender must be either 'Male' or 'Female'.",
+        });
+      }
+    }
+  }
+
+  for (const field of ["phone", "occupation", "bloodGroup"] as const) {
     if (raw[field] !== undefined) {
       hasUpdateFields = true;
       const value = raw[field];

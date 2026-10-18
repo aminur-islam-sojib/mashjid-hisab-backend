@@ -17,16 +17,17 @@ import {
   addFamilyMemberHandler,
   updateFamilyMemberHandler,
   removeFamilyMemberHandler,
+  getFamilyByMembershipHandler,
+  addFamilyMemberByMembershipHandler,
 } from "./family.controller.js";
 
 const familyRouter: Router = Router({ mergeParams: true });
 
 /**
  * POST /api/mosques/:mosqueId/families
- * Access: Authenticated, any ACTIVE member
+ * Access: Authenticated, any ACTIVE member (admin can assign headMembershipId)
  *
- * Creates a Family with the caller as head. One Membership may head at
- * most one Family.
+ * Creates a Family. One Membership may head at most one Family.
  */
 familyRouter.post(
   "/",
@@ -46,6 +47,32 @@ familyRouter.get(
   authenticate,
   requireMosqueMembership(),
   getMosqueFamiliesHandler,
+);
+
+/**
+ * GET /api/mosques/:mosqueId/families/member/:membershipId
+ * Access: Authenticated, target member or OVERSIGHT
+ *
+ * Gets family household for a specific member.
+ */
+familyRouter.get(
+  "/member/:membershipId",
+  authenticate,
+  requireMosqueMembership(),
+  getFamilyByMembershipHandler,
+);
+
+/**
+ * POST /api/mosques/:mosqueId/families/member/:membershipId/members
+ * Access: Authenticated, target member or MOSQUE_ADMIN/oversight
+ *
+ * Adds a family member directly for a member (auto-provisioning household if needed).
+ */
+familyRouter.post(
+  "/member/:membershipId/members",
+  authenticate,
+  requireMosqueMembership(),
+  addFamilyMemberByMembershipHandler,
 );
 
 /**

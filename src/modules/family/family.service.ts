@@ -87,9 +87,9 @@ function assertFamilyHeadOrAdmin(
 // ---------------------------------------------------------------------------
 
 /**
- * Creates a Family with the caller's own Membership as head.
- * One Membership can head at most one Family — enforced here with a
- * friendly error before hitting the DB's unique-constraint 500.
+ * Creates a Family. Plain MEMBER sets caller as head; MOSQUE_ADMIN / oversight roles
+ * can optionally assign any active mosque member as the head via headMembershipId.
+ * One Membership can head at most one Family.
  */
 export async function createFamily(
   mosqueId: string,
@@ -98,15 +98,49 @@ export async function createFamily(
 ): Promise<Family> {
   const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
 
+  const isOversight = (
+    [Role.MOSQUE_ADMIN, Role.TREASURER, Role.COMMITTEE_MEMBER] as Role[]
+  ).includes(callerMembership.role);
+
+  let targetHeadId = callerMembership.id;
+  if (input.headMembershipId && input.headMembershipId !== callerMembership.id) {
+    if (!isOversight) {
+      throw HttpError.forbidden(
+        "Only mosque administrators and oversight officers can create a family for another member.",
+        "FORBIDDEN_HEAD_ASSIGNMENT",
+      );
+    }
+
+    const targetMembership = await prisma.membership.findFirst({
+      where: {
+        id: input.headMembershipId,
+        mosqueId: resolvedMosqueId,
+        status: MembershipStatus.ACTIVE,
+      },
+      include: { user: { select: { name: true } } },
+    });
+
+    if (!targetMembership) {
+      throw HttpError.notFound(
+        "Target member not found or is not an active member of this mosque.",
+        "MEMBER_NOT_FOUND",
+      );
+    }
+
+    targetHeadId = targetMembership.id;
+  }
+
   // Friendly check for existing family headed by this membership
   const existing = await prisma.family.findUnique({
-    where: { headMembershipId: callerMembership.id },
+    where: { headMembershipId: targetHeadId },
     select: { id: true },
   });
 
   if (existing) {
     throw HttpError.conflict(
-      "You already head a family in this mosque. Transfer headship first if you need to start a new one.",
+      targetHeadId === callerMembership.id
+        ? "You already head a family in this mosque. Transfer headship first if you need to start a new one."
+        : "This member already heads a family in this mosque.",
       "FAMILY_ALREADY_EXISTS",
     );
   }
@@ -117,7 +151,7 @@ export async function createFamily(
         mosqueId: resolvedMosqueId,
         name: input.name,
         address: input.address,
-        headMembershipId: callerMembership.id,
+        headMembershipId: targetHeadId,
       },
     });
   } catch (error) {
@@ -126,12 +160,113 @@ export async function createFamily(
       error.code === "P2002"
     ) {
       throw HttpError.conflict(
-        "You already head a family in this mosque. Transfer headship first if you need to start a new one.",
+        "This member already heads a family in this mosque.",
         "FAMILY_ALREADY_EXISTS",
       );
     }
     throw error;
   }
+}
+
+/**
+ * Gets a family by a member's ID. Accessible by that member or OVERSIGHT roles.
+ */
+export async function getFamilyByMembership(
+  mosqueId: string,
+  targetMembershipId: string,
+  callerMembership: Membership,
+) {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+  const isOversight = (
+    [Role.MOSQUE_ADMIN, Role.TREASURER, Role.COMMITTEE_MEMBER] as Role[]
+  ).includes(callerMembership.role);
+  const isSelf = targetMembershipId === callerMembership.id;
+
+  if (!isSelf && !isOversight) {
+    throw HttpError.notFound("Family not found.", "FAMILY_NOT_FOUND");
+  }
+
+  const family = await prisma.family.findFirst({
+    where: {
+      mosqueId: resolvedMosqueId,
+      OR: [
+        { headMembershipId: targetMembershipId },
+        { members: { some: { linkedMembershipId: targetMembershipId } } },
+      ],
+    },
+    include: {
+      headMembership: {
+        include: { user: { select: { id: true, name: true, email: true, phone: true } } },
+      },
+      members: { orderBy: { createdAt: "asc" } },
+      _count: { select: { members: true } },
+    },
+  });
+
+  return family;
+}
+
+/**
+ * Directly adds a family member for any mosque member.
+ * If the member does not yet have a family household, one is automatically created for them.
+ */
+export async function addFamilyMemberByMembership(
+  mosqueId: string,
+  targetMembershipId: string,
+  callerMembership: Membership,
+  input: CreateFamilyMemberInput,
+): Promise<FamilyMember> {
+  const resolvedMosqueId = await resolveActiveMosqueId(mosqueId);
+
+  const isOversight = (
+    [Role.MOSQUE_ADMIN, Role.TREASURER, Role.COMMITTEE_MEMBER] as Role[]
+  ).includes(callerMembership.role);
+  const isSelf = targetMembershipId === callerMembership.id;
+
+  if (!isSelf && !isOversight) {
+    throw HttpError.notFound("Member not found.", "MEMBER_NOT_FOUND");
+  }
+
+  const targetMembership = await prisma.membership.findFirst({
+    where: {
+      id: targetMembershipId,
+      mosqueId: resolvedMosqueId,
+      status: MembershipStatus.ACTIVE,
+    },
+    include: {
+      user: { select: { name: true } },
+      headOfFamily: true,
+    },
+  });
+
+  if (!targetMembership) {
+    throw HttpError.notFound("Member not found in this mosque.", "MEMBER_NOT_FOUND");
+  }
+
+  let family = targetMembership.headOfFamily;
+  if (!family) {
+    const familyName = `${targetMembership.user.name}'s Family`;
+    family = await prisma.family.create({
+      data: {
+        mosqueId: resolvedMosqueId,
+        name: familyName,
+        headMembershipId: targetMembership.id,
+      },
+    });
+  }
+
+  return prisma.familyMember.create({
+    data: {
+      familyId: family.id,
+      name: input.name,
+      relation: input.relation,
+      dateOfBirth: input.dateOfBirth,
+      gender: input.gender,
+      phone: input.phone,
+      occupation: input.occupation,
+      bloodGroup: input.bloodGroup,
+    },
+  });
 }
 
 export interface GetMosqueFamiliesOptions {
