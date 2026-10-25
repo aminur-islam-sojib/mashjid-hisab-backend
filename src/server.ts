@@ -1,3 +1,8 @@
+import net from "node:net";
+if (typeof net.setDefaultAutoSelectFamily === "function") {
+  net.setDefaultAutoSelectFamily(false);
+}
+
 import app from "./app";
 import config from "./config";
 import { prisma } from "./lib/prisma";

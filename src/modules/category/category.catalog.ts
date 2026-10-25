@@ -223,6 +223,12 @@ export async function seedDefaultCategoriesForMosque(
 
   let createdCount = 0;
   let skippedCount = 0;
+  const toCreate: Array<{
+    mosqueId: string;
+    name: string;
+    type: CategoryType;
+    fundId: string | null;
+  }> = [];
 
   for (const item of fullCatalog) {
     const key = `${item.type}:${item.name.trim().toLowerCase()}`;
@@ -242,16 +248,19 @@ export async function seedDefaultCategoriesForMosque(
       fundId = constructionFund.id;
     }
 
-    await db.category.create({
-      data: {
-        mosqueId: resolvedMosqueId,
-        name: item.name,
-        type: item.type,
-        fundId,
-      },
+    toCreate.push({
+      mosqueId: resolvedMosqueId,
+      name: item.name,
+      type: item.type,
+      fundId,
     });
+  }
 
-    createdCount++;
+  if (toCreate.length > 0) {
+    await db.category.createMany({
+      data: toCreate,
+    });
+    createdCount = toCreate.length;
   }
 
   // 3. Return updated category list for this mosque

@@ -300,6 +300,9 @@ export async function createMosque(
       await seedDefaultCategoriesForMosque(mosque.id, { tx });
 
       return { mosque, membership };
+    }, {
+      maxWait: 10000,
+      timeout: 20000,
     });
 
     return result;

@@ -1,6 +1,12 @@
 import "dotenv/config";
+import net from "node:net";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, Prisma } from "../../generated/prisma/client.js";
+
+// Prevent Node 18+/20+/24+ Happy Eyeballs from timing out when IPv6 is unreachable
+if (typeof net.setDefaultAutoSelectFamily === "function") {
+  net.setDefaultAutoSelectFamily(false);
+}
 
 const connectionString = `${process.env.DATABASE_URL}`;
 
